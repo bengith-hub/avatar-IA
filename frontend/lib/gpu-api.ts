@@ -8,6 +8,7 @@ function workerHeaders(): HeadersInit {
   return {
     Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
     "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
   };
 }
 
@@ -55,7 +56,9 @@ function connectionError(action: string, err: unknown): Error {
 
 export async function workerHealth() {
   try {
-    const res = await fetch(`${workerUrl()}/health`);
+    const res = await fetch(`${workerUrl()}/health`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+    });
     if (!res.ok) {
       const body = await res.text();
       throw workerError("health", res.status, body);

@@ -65,6 +65,7 @@ export async function GET() {
       await checkService("Worker GPU", async () => {
         const url = process.env.GPU_WORKER_URL!.replace(/\/$/, "");
         const res = await fetch(`${url}/health`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
           signal: AbortSignal.timeout(10000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
