@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { cn } from "@/lib/cn";
 
 interface Avatar {
@@ -40,17 +39,13 @@ const AvatarSelector = ({ avatars, value, onChange }: AvatarSelectorProps) => {
               )}
             >
               {avatar.url ? (
-                <div className="relative h-16 w-16 overflow-hidden rounded-full">
-                  <Image
-                    src={avatar.url}
-                    alt={avatar.name}
-                    fill
-                    className="object-cover"
-                    sizes="64px"
-                  />
-                </div>
+                <img
+                  src={avatar.url}
+                  alt={avatar.name}
+                  className="h-20 w-20 rounded-full object-cover"
+                />
               ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-700 text-xl font-bold text-zinc-300">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-zinc-700 text-2xl font-bold text-zinc-300">
                   {avatar.name.charAt(0).toUpperCase()}
                 </div>
               )}
