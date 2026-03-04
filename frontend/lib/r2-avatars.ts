@@ -82,9 +82,17 @@ export async function listR2Avatars(): Promise<
       const filename = key.replace(PREFIX, "");
       const ext = filename.split(".").pop() ?? "png";
       const id = filename.replace(/\.[^.]+$/, "");
+      // Build a human-readable name: strip the r2-timestamp-hash prefix
+      const readable = id
+        .replace(/^r2-\d+-[a-z0-9]+[-_]?/, "")
+        .replace(/[-_]/g, " ")
+        .trim();
+      const name = readable.length > 0
+        ? readable.charAt(0).toUpperCase() + readable.slice(1)
+        : `Avatar ${(response.Contents ?? []).indexOf(obj) + 1}`;
       return {
         id,
-        name: id,
+        name,
         type: ext,
         source: "r2",
         url: proxyUrl(key),

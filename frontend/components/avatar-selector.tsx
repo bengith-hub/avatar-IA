@@ -1,10 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
 import { cn } from "@/lib/cn";
 
+interface Avatar {
+  id: string;
+  name: string;
+  url?: string;
+}
+
 interface AvatarSelectorProps {
-  avatars: { id: string; name: string }[];
+  avatars: Avatar[];
   value: string;
   onChange: (id: string) => void;
 }
@@ -33,10 +39,22 @@ const AvatarSelector = ({ avatars, value, onChange }: AvatarSelectorProps) => {
                   : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600"
               )}
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-zinc-700 text-lg font-bold text-zinc-300">
-                {avatar.name.charAt(0)}
-              </div>
-              <span className="truncate">{avatar.name}</span>
+              {avatar.url ? (
+                <div className="relative h-16 w-16 overflow-hidden rounded-full">
+                  <Image
+                    src={avatar.url}
+                    alt={avatar.name}
+                    fill
+                    className="object-cover"
+                    sizes="64px"
+                  />
+                </div>
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-full bg-zinc-700 text-xl font-bold text-zinc-300">
+                  {avatar.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="max-w-full truncate text-xs">{avatar.name}</span>
             </button>
           ))}
         </div>
