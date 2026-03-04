@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getInstanceStatus, getBilling } from "@/lib/vast-api";
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
   }
+
+  const { searchParams } = new URL(request.url);
+  const debug = searchParams.get("debug") === "1";
 
   try {
     const [instance, billing] = await Promise.all([
@@ -14,9 +17,10 @@ export async function GET() {
       getBilling(),
     ]);
 
-    // Debug: log raw responses to help diagnose field mapping issues
-    console.log("[vast/status] instance keys:", Object.keys(instance));
-    console.log("[vast/status] billing keys:", Object.keys(billing));
+    // Return raw API responses for debugging
+    if (debug) {
+      return NextResponse.json({ _debug: true, instance, billing });
+    }
 
     return NextResponse.json({
       instance: {
