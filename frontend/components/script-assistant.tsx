@@ -1,10 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Sparkles, Loader2, FileText, MessageSquare } from "lucide-react";
 
 interface ScriptAssistantProps {
   onInsert: (script: string) => void;
+}
+
+function extractSpokenText(script: string): string {
+  const lines: string[] = [];
+  const regex = /TEXTE\s*:\s*[«""]([^»""]+)[»""]/g;
+  let match;
+  while ((match = regex.exec(script)) !== null) {
+    lines.push(match[1].trim());
+  }
+  return lines.length > 0 ? lines.join("\n\n") : script;
 }
 
 const ScriptAssistant = ({ onInsert }: ScriptAssistantProps) => {
@@ -63,15 +73,25 @@ const ScriptAssistant = ({ onInsert }: ScriptAssistantProps) => {
 
       {result && (
         <div>
-          <pre className="mb-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg bg-zinc-800 p-3 text-sm text-zinc-300">
+          <pre className="mb-3 max-h-60 overflow-y-auto whitespace-pre-wrap rounded-lg bg-zinc-800 p-3 text-sm text-zinc-300">
             {result}
           </pre>
-          <button
-            onClick={() => onInsert(result)}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
-          >
-            Utiliser ce script
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onInsert(extractSpokenText(result))}
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
+            >
+              <MessageSquare className="h-3 w-3" />
+              Utiliser le texte parlé
+            </button>
+            <button
+              onClick={() => onInsert(result)}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-600"
+            >
+              <FileText className="h-3 w-3" />
+              Utiliser le script complet
+            </button>
+          </div>
         </div>
       )}
     </div>
