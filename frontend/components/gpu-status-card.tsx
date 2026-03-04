@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Power, PowerOff, RefreshCw, Cpu, Timer, AlertTriangle } from "lucide-react";
+import { Power, PowerOff, RefreshCw, Cpu, Timer, AlertTriangle, Wifi, WifiOff } from "lucide-react";
 
 interface VmStatus {
   instance: {
@@ -36,6 +36,12 @@ const GpuStatusCard = () => {
   const [autoStopMinutes, setAutoStopMinutes] = useState(30);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
+  const [workerStatus, setWorkerStatus] = useState<{
+    tested: boolean;
+    connected: boolean;
+    loading: boolean;
+    detail: string;
+  }>({ tested: false, connected: false, loading: false, detail: "" });
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -110,6 +116,38 @@ const GpuStatusCard = () => {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const testWorkerConnection = async () => {
+    setWorkerStatus((s) => ({ ...s, loading: true }));
+    try {
+      const res = await fetch("/api/gpu/health");
+      const data = await res.json();
+      if (data.connected) {
+        const gpu = data.gpu_name ?? "GPU";
+        const mem = data.gpu_memory ? ` — ${data.gpu_memory}` : "";
+        setWorkerStatus({
+          tested: true,
+          connected: true,
+          loading: false,
+          detail: `Connecté : ${gpu}${mem}`,
+        });
+      } else {
+        setWorkerStatus({
+          tested: true,
+          connected: false,
+          loading: false,
+          detail: data.error ?? "Worker injoignable",
+        });
+      }
+    } catch {
+      setWorkerStatus({
+        tested: true,
+        connected: false,
+        loading: false,
+        detail: "Erreur réseau lors du test",
+      });
     }
   };
 
@@ -225,6 +263,39 @@ const GpuStatusCard = () => {
           ))}
         </select>
       </div>
+
+      {/* Worker connection test */}
+      {isRunning && (
+        <div className="mb-4">
+          <button
+            onClick={testWorkerConnection}
+            disabled={workerStatus.loading}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {workerStatus.loading ? (
+              <RefreshCw className="h-4 w-4 animate-spin" />
+            ) : workerStatus.tested && workerStatus.connected ? (
+              <Wifi className="h-4 w-4 text-green-400" />
+            ) : workerStatus.tested ? (
+              <WifiOff className="h-4 w-4 text-red-400" />
+            ) : (
+              <Wifi className="h-4 w-4" />
+            )}
+            Tester la connexion Worker
+          </button>
+          {workerStatus.tested && (
+            <p
+              className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                workerStatus.connected
+                  ? "bg-green-500/10 text-green-400"
+                  : "bg-red-500/10 text-red-400"
+              }`}
+            >
+              {workerStatus.detail}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-3">
         <button
