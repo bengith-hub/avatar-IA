@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save } from "lucide-react";
 
 interface Avatar {
   id: string;
@@ -14,6 +14,28 @@ interface AstriaResult {
   images: string[];
   status: string;
 }
+
+interface SavedImage {
+  url: string;
+  prompt: string;
+  savedAt: string;
+}
+
+const STORAGE_KEY = "astria-saved-images";
+
+const loadSavedImages = (): SavedImage[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const persistSavedImages = (images: SavedImage[]) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(images));
+};
 
 export default function AvatarsPage() {
   const [avatars, setAvatars] = useState<Avatar[]>([]);
@@ -29,6 +51,7 @@ export default function AvatarsPage() {
   const [astriaError, setAstriaError] = useState("");
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
 
   const fetchAvatars = async () => {
     setLoading(true);
@@ -47,6 +70,7 @@ export default function AvatarsPage() {
 
   useEffect(() => {
     fetchAvatars();
+    setSavedImages(loadSavedImages());
   }, []);
 
   // Poll Astria status with timeout
@@ -160,6 +184,29 @@ export default function AvatarsPage() {
       else next.add(url);
       return next;
     });
+  };
+
+  const saveSelectedImages = () => {
+    const promptText = astriaPrompt || "Sans prompt";
+    const newImages: SavedImage[] = Array.from(selectedImages)
+      .filter((url) => !savedImages.some((s) => s.url === url))
+      .map((url) => ({ url, prompt: promptText, savedAt: new Date().toISOString() }));
+    if (newImages.length === 0) return;
+    const updated = [...savedImages, ...newImages];
+    setSavedImages(updated);
+    persistSavedImages(updated);
+    setSelectedImages(new Set());
+  };
+
+  const removeSavedImage = (url: string) => {
+    const updated = savedImages.filter((img) => img.url !== url);
+    setSavedImages(updated);
+    persistSavedImages(updated);
+  };
+
+  const clearAllSaved = () => {
+    setSavedImages([]);
+    persistSavedImages([]);
   };
 
   const promptSuggestions = [
@@ -285,10 +332,18 @@ export default function AvatarsPage() {
                 ))}
               </div>
               {selectedImages.size > 0 && (
-                <p className="mt-3 text-sm text-zinc-400">
-                  {selectedImages.size} photo{selectedImages.size > 1 ? "s" : ""} sélectionnée{selectedImages.size > 1 ? "s" : ""}
-                  — ces images seront utilisables comme avatars quand la VM GPU sera active.
-                </p>
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    onClick={saveSelectedImages}
+                    className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-500"
+                  >
+                    <Save className="h-4 w-4" />
+                    Garder {selectedImages.size} photo{selectedImages.size > 1 ? "s" : ""}
+                  </button>
+                  <span className="text-sm text-zinc-500">
+                    Les photos gardées restent disponibles au rechargement.
+                  </span>
+                </div>
               )}
             </div>
           )}
@@ -309,6 +364,63 @@ export default function AvatarsPage() {
           )}
         </div>
       </section>
+
+      {/* Photos gardées (persistées en localStorage) */}
+      {savedImages.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <Check className="h-5 w-5 text-green-400" />
+              Photos gardées ({savedImages.length})
+            </h2>
+            <button
+              onClick={clearAllSaved}
+              className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-red-900/50 hover:text-red-400"
+            >
+              <Trash2 className="h-3 w-3" />
+              Tout supprimer
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5">
+            {savedImages.map((img) => (
+              <div
+                key={img.url}
+                className="group relative overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900"
+              >
+                <button
+                  onClick={() => setPreviewUrl(img.url)}
+                  className="w-full"
+                >
+                  <img
+                    src={img.url}
+                    alt="Photo gardée"
+                    className="aspect-square w-full object-cover"
+                  />
+                </button>
+                <div className="px-2 py-1.5">
+                  <p className="truncate text-xs text-zinc-500" title={img.prompt}>
+                    {img.prompt}
+                  </p>
+                </div>
+                <button
+                  onClick={() => removeSavedImage(img.url)}
+                  className="absolute right-1 top-1 rounded-full bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-red-600"
+                  title="Supprimer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setPreviewUrl(img.url)}
+                  className="absolute left-1 top-1 rounded-full bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80"
+                  title="Agrandir"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Photos de référence */}
       <section className="mb-8">
