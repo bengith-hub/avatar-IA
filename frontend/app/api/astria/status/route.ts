@@ -15,7 +15,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await getAstriaPrompt(Number(promptId));
-    return NextResponse.json(result);
+
+    // Normalize: if images exist but status is missing, mark as processed
+    const normalized = {
+      ...result,
+      status: result.status || (result.images?.length > 0 ? "processed" : "queued"),
+    };
+
+    return NextResponse.json(normalized);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
     return NextResponse.json({ error: message }, { status: 500 });
