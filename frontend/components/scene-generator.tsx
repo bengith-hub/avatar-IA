@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, Play } from "lucide-react";
+import { Loader2, Play, Sparkles } from "lucide-react";
 import AvatarSelector from "@/components/avatar-selector";
 import BackgroundPicker from "@/components/background-picker";
 import ScriptAssistant from "@/components/script-assistant";
@@ -143,25 +143,39 @@ const SceneGenerator = () => {
   const isCompleted = jobStatus?.status === "completed";
   const progress = jobStatus?.progress ?? 0;
 
+  const [showAssistant, setShowAssistant] = useState(false);
+
   return (
     <div className="flex flex-col gap-6">
-      {/* Script assistant */}
-      <ScriptAssistant onInsert={(script) => setText(script)} />
-
       {/* Text input */}
       <div>
-        <label className="mb-2 block text-sm font-medium text-zinc-300">
-          Texte à dire
-        </label>
+        <div className="mb-2 flex items-center justify-between">
+          <label className="text-sm font-medium text-zinc-300">
+            Texte à dire
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowAssistant(!showAssistant)}
+            className="flex items-center gap-1.5 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+          >
+            <Sparkles className="h-3 w-3" />
+            {showAssistant ? "Masquer l'assistant" : "Générer avec l'IA"}
+          </button>
+        </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Tapez le texte que l'avatar doit prononcer..."
-          rows={4}
-          className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500"
+          placeholder="Collez ou tapez le texte que l'avatar doit prononcer..."
+          rows={6}
+          className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500"
         />
         <p className="mt-1 text-xs text-zinc-500">{text.length} / 5000 caractères</p>
       </div>
+
+      {/* Script assistant (collapsible) */}
+      {showAssistant && (
+        <ScriptAssistant onInsert={(script) => setText(script)} />
+      )}
 
       {/* Language + Emotion + Format */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
