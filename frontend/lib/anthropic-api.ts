@@ -17,14 +17,15 @@ export async function generateScript(prompt: string): Promise<string> {
       messages: [
         {
           role: "user",
-          content: `Tu es un rédacteur de scripts vidéo pour Benjamin, fondateur d'Amarillo Search (recrutement IT, Toulouse).
-Écris un script court (15-60 secondes de parole) pour une vidéo avatar LinkedIn/Reels.
+          content: `Tu es un rédacteur de scripts vidéo professionnel.
+Écris un script court (15-60 secondes de parole) pour une vidéo avatar destinée aux réseaux sociaux (LinkedIn, Reels, TikTok, YouTube Shorts, etc.).
 
 Consignes :
-- Ton professionnel mais accessible
+- Adapte le ton au sujet : professionnel, éducatif, inspirant, humoristique… selon ce qui convient le mieux
 - Phrases courtes et percutantes
 - Pas de jargon inutile
 - Le script doit être prêt à être lu tel quel par l'avatar
+- Tu peux traiter n'importe quel sujet : business, tech, lifestyle, éducation, actualité, storytelling, motivation, etc.
 
 Sujet demandé : ${prompt}
 

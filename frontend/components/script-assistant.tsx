@@ -45,7 +45,7 @@ const ScriptAssistant = ({ onInsert }: ScriptAssistantProps) => {
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Décrivez le sujet de la vidéo... Ex: Présente les avantages du recrutement IT à Toulouse"
+        placeholder="Décrivez le sujet de la vidéo... Ex: 3 astuces pour réussir un entretien, Les tendances IA en 2026, Pourquoi voyager seul change la vie..."
         rows={2}
         className="mb-2 w-full resize-none rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-white placeholder-zinc-500 outline-none focus:border-amber-500"
       />
