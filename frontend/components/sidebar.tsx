@@ -9,6 +9,7 @@ import {
   Video,
   Images,
   UserCircle,
+  Settings,
   LogOut,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ const navItems = [
   { href: "/generate", label: "Générer", icon: Video },
   { href: "/gallery", label: "Galerie", icon: Images },
   { href: "/avatars", label: "Avatars", icon: UserCircle },
+  { href: "/settings", label: "Connexions", icon: Settings },
 ];
 
 const Sidebar = () => {
