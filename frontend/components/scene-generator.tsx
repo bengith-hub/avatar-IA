@@ -51,7 +51,7 @@ const SceneGenerator = () => {
   const [emotion, setEmotion] = useState("neutral");
   const [format, setFormat] = useState("16:9");
 
-  const [avatars, setAvatars] = useState<{ id: string; name: string }[]>([]);
+  const [avatars, setAvatars] = useState<{ id: string; name: string; url?: string }[]>([]);
   const [generating, setGenerating] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
@@ -64,7 +64,11 @@ const SceneGenerator = () => {
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data) && data.length > 0) {
-            setAvatars(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })));
+            setAvatars(data.map((a: { id: string; name: string; url?: string }) => ({
+              id: a.id,
+              name: a.name,
+              url: a.url,
+            })));
             return;
           }
         }
