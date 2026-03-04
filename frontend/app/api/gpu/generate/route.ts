@@ -65,11 +65,14 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
     body: form,
   });
 
-  if (!uploadRes.ok) {
-    throw new Error(`Échec de l'envoi de l'avatar au worker (${uploadRes.status})`);
+  const uploadBody = await uploadRes.text();
+  if (!uploadRes.ok || uploadBody.includes("<!doctype") || uploadBody.includes("<!DOCTYPE")) {
+    throw new Error(
+      "Impossible de joindre la VM GPU. Vérifiez que le tunnel ngrok est actif."
+    );
   }
 
-  const result = await uploadRes.json();
+  const result = JSON.parse(uploadBody);
   return result.id as string;
 }
 
