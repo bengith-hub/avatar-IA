@@ -23,7 +23,10 @@ export async function GET(req: NextRequest) {
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
       message.includes("UND_ERR") ||
-      message.includes("is not set");
+      message.includes("is not set") ||
+      message.includes("failed (404)") ||
+      message.includes("failed (502)") ||
+      message.includes("failed (503)");
     if (isUnavailable) {
       return NextResponse.json(
         { error: "VM GPU éteinte — démarrez-la d'abord" },
