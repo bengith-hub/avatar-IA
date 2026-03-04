@@ -19,10 +19,11 @@ export default function AvatarsPage() {
   const fetchAvatars = async () => {
     setLoading(true);
     try {
-      // Avatars come from the worker via proxy
-      const res = await fetch("/api/gpu/jobs"); // Using jobs endpoint to check worker connectivity
-      // For now, we'll display placeholder data until worker is running
-      setAvatars([]);
+      const res = await fetch("/api/gpu/avatars");
+      if (!res.ok) throw new Error("Worker non disponible");
+      const data = await res.json();
+      setAvatars(Array.isArray(data) ? data : []);
+      setError("");
     } catch {
       setAvatars([]);
     } finally {
@@ -45,9 +46,15 @@ export default function AvatarsPage() {
       const formData = new FormData();
       formData.append("file", file);
 
-      // TODO: Add /api/gpu/avatars/upload proxy route
-      // For now, show a placeholder message
-      setError("Le worker GPU doit être démarré pour uploader des avatars.");
+      const res = await fetch("/api/gpu/avatars", {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Upload échoué");
+      }
+      await fetchAvatars();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {

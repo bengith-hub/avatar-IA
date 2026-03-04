@@ -58,27 +58,26 @@ const SceneGenerator = () => {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch("/api/gpu/jobs")
-      .then(() =>
-        fetch("/api/gpu/generate", { method: "OPTIONS" }).catch(() => {})
-      )
-      .catch(() => {});
-
-    fetch("/api/vast/status")
-      .then((r) => r.json())
-      .then(() => {
-        // Fetch avatars from worker if available
-        fetch("/api/gpu/jobs")
-          .catch(() => {});
-      })
-      .catch(() => {});
-
-    // Mock avatars for now (will come from worker API)
-    setAvatars([
-      { id: "benjamin-buste", name: "Benjamin Buste" },
-      { id: "benjamin-pied", name: "Benjamin Pied" },
-      { id: "benjamin-assis", name: "Benjamin Assis" },
-    ]);
+    const loadAvatars = async () => {
+      try {
+        const res = await fetch("/api/gpu/avatars");
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data) && data.length > 0) {
+            setAvatars(data.map((a: { id: string; name: string }) => ({ id: a.id, name: a.name })));
+            return;
+          }
+        }
+      } catch {
+        // Worker not available, use defaults
+      }
+      setAvatars([
+        { id: "benjamin-buste", name: "Benjamin Buste" },
+        { id: "benjamin-pied", name: "Benjamin Pied" },
+        { id: "benjamin-assis", name: "Benjamin Assis" },
+      ]);
+    };
+    loadAvatars();
   }, []);
 
   const pollStatus = useCallback(async (id: string) => {
