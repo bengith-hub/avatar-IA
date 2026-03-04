@@ -70,6 +70,8 @@ async def health():
         gpu_memory=gpu_memory,
         uptime=time.time() - start_time,
         models_loaded=tts_engine.is_loaded and avatar_engine.is_loaded,
+        last_activity=job_manager.last_activity,
+        active_jobs=job_manager.active_jobs_count(),
     )
 
 
