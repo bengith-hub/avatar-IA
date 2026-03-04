@@ -65,7 +65,7 @@ export default function AvatarsPage() {
     }
 
     if (!pollStartRef.current) pollStartRef.current = Date.now();
-    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
 
     const interval = setInterval(async () => {
       if (Date.now() - pollStartRef.current > TIMEOUT_MS) {
