@@ -12,7 +12,16 @@ export async function GET() {
     const result = await listAvatars();
     return NextResponse.json(result);
   } catch (error) {
+    // If the worker is unreachable (VM stopped), return empty list instead of 500
     const message = error instanceof Error ? error.message : "Erreur inconnue";
+    const isNetworkError =
+      message.includes("fetch failed") ||
+      message.includes("ECONNREFUSED") ||
+      message.includes("ETIMEDOUT") ||
+      message.includes("UND_ERR");
+    if (isNetworkError) {
+      return NextResponse.json([]);
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
