@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { listAvatars } from "@/lib/gpu-api";
+import { uploadToR2, listR2Avatars } from "@/lib/r2-avatars";
 
 export async function GET() {
   const session = await auth();
@@ -9,23 +10,29 @@ export async function GET() {
   }
 
   try {
-    const result = await listAvatars();
-    return NextResponse.json(result);
-  } catch (error) {
-    // If the worker is unreachable (VM stopped), return empty list instead of 500
-    const message = error instanceof Error ? error.message : "Erreur inconnue";
-    const isUnavailable =
-      message.includes("fetch failed") ||
-      message.includes("ECONNREFUSED") ||
-      message.includes("ETIMEDOUT") ||
-      message.includes("UND_ERR") ||
-      message.includes("is not set") ||
-      message.includes("failed (404)") ||
-      message.includes("failed (502)") ||
-      message.includes("failed (503)");
-    if (isUnavailable) {
-      return NextResponse.json([]);
+    // Try GPU worker first, fall back to R2-stored avatars
+    let workerAvatars: { id: string; name: string; type: string; source: string }[] = [];
+    try {
+      const result = await listAvatars();
+      workerAvatars = (Array.isArray(result) ? result : []).map((a: { id: string; name: string; type: string }) => ({
+        ...a,
+        source: "worker",
+      }));
+    } catch {
+      // Worker unavailable, that's fine
     }
+
+    // Also get R2-stored avatars
+    let r2Avatars: { id: string; name: string; type: string; source: string; url: string }[] = [];
+    try {
+      r2Avatars = await listR2Avatars();
+    } catch {
+      // R2 not configured, that's fine
+    }
+
+    return NextResponse.json([...workerAvatars, ...r2Avatars]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erreur inconnue";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -43,29 +50,51 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Fichier requis" }, { status: 400 });
     }
 
+    // Try GPU worker first
     const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
-    if (!workerUrl) throw new Error("GPU_WORKER_URL is not set");
+    if (workerUrl) {
+      try {
+        const workerForm = new FormData();
+        workerForm.append("file", file);
 
-    const workerForm = new FormData();
-    workerForm.append("file", file);
+        const res = await fetch(`${workerUrl}/avatars`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
+          },
+          body: workerForm,
+        });
 
-    const res = await fetch(`${workerUrl}/avatars`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
-      },
-      body: workerForm,
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Worker upload failed (${res.status}): ${text}`);
+        if (res.ok) {
+          const result = await res.json();
+          return NextResponse.json(result);
+        }
+      } catch {
+        // Worker unavailable, fall through to R2
+      }
     }
 
-    const result = await res.json();
+    // Fallback: store on R2
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const fileName = file instanceof File ? file.name : "avatar.png";
+    const result = await uploadToR2(buffer, fileName, file.type);
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
+
+    if (
+      message.includes("fetch failed") ||
+      message.includes("ECONNREFUSED") ||
+      message.includes("ETIMEDOUT") ||
+      message.includes("is not set")
+    ) {
+      return NextResponse.json(
+        { error: "VM GPU non démarrée et R2 non configuré. Démarrez la VM ou configurez R2 pour stocker les photos." },
+        { status: 503 }
+      );
+    }
+
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

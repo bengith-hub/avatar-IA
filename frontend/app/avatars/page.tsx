@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, MicOff, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save, Play, Pause, Square } from "lucide-react";
 
 interface Avatar {
   id: string;
   name: string;
   type: string;
+  source?: string;
+  url?: string;
 }
 
 interface AstriaResult {
@@ -53,6 +55,160 @@ export default function AvatarsPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
 
+  // Voice sample state
+  const [voiceSamples, setVoiceSamples] = useState<{ name: string; url: string; source?: string }[]>([]);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const voiceFileRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchVoiceSamples = async () => {
+    try {
+      const res = await fetch("/api/gpu/voice");
+      if (!res.ok) return;
+      const data = await res.json();
+      setVoiceSamples(Array.isArray(data) ? data : []);
+    } catch {
+      // Silently fail
+    }
+  };
+
+  const handleVoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingVoice(true);
+    setVoiceError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/gpu/voice", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Upload échoué");
+      }
+
+      await fetchVoiceSamples();
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setUploadingVoice(false);
+      if (voiceFileRef.current) voiceFileRef.current.value = "";
+    }
+  };
+
+  const togglePlayVoice = (url: string) => {
+    if (playingVoice === url) {
+      audioRef.current?.pause();
+      setPlayingVoice(null);
+      return;
+    }
+    if (audioRef.current) audioRef.current.pause();
+    const audio = new Audio(url);
+    audio.onended = () => setPlayingVoice(null);
+    audio.play();
+    audioRef.current = audio;
+    setPlayingVoice(url);
+  };
+
+  const deleteVoiceSample = async (name: string) => {
+    try {
+      await fetch("/api/gpu/voice", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      await fetchVoiceSamples();
+    } catch {
+      // Silently fail
+    }
+  };
+
+  const startRecording = async () => {
+    setVoiceError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+      recordingChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        setRecordingTime(0);
+
+        const blob = new Blob(recordingChunksRef.current, { type: "audio/webm" });
+        if (blob.size === 0) return;
+
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        const file = new File([blob], `enregistrement-${timestamp}.webm`, {
+          type: "audio/webm",
+        });
+
+        setUploadingVoice(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const res = await fetch("/api/gpu/voice", {
+            method: "POST",
+            body: formData,
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error ?? "Upload échoué");
+          }
+          await fetchVoiceSamples();
+        } catch (err) {
+          setVoiceError(err instanceof Error ? err.message : "Erreur upload");
+        } finally {
+          setUploadingVoice(false);
+        }
+      };
+
+      mediaRecorder.start(250);
+      mediaRecorderRef.current = mediaRecorder;
+      setRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((t) => t + 1);
+      }, 1000);
+    } catch {
+      setVoiceError("Impossible d\u2019acc\u00e9der au micro. V\u00e9rifiez les permissions du navigateur.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
   const fetchAvatars = async () => {
     setLoading(true);
     try {
@@ -70,6 +226,7 @@ export default function AvatarsPage() {
 
   useEffect(() => {
     fetchAvatars();
+    fetchVoiceSamples();
     setSavedImages(loadSavedImages());
   }, []);
 
@@ -437,13 +594,28 @@ export default function AvatarsPage() {
           {avatars.map((avatar) => (
             <div
               key={avatar.id}
-              className="flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+              className="group relative flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900 p-4"
             >
-              <div className="mb-2 flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-zinc-500">
-                {avatar.name.charAt(0)}
-              </div>
+              {avatar.url ? (
+                <button
+                  onClick={() => setPreviewUrl(avatar.url!)}
+                  className="mb-2 h-20 w-20 overflow-hidden rounded-full"
+                >
+                  <img
+                    src={avatar.url}
+                    alt={avatar.name}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div className="mb-2 flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-zinc-500">
+                  {avatar.name.charAt(0)}
+                </div>
+              )}
               <span className="text-sm font-medium text-white">{avatar.name}</span>
-              <span className="text-xs text-zinc-500">{avatar.type}</span>
+              <span className="text-xs text-zinc-500">
+                {avatar.source === "r2" ? "Stocké en ligne" : avatar.type}
+              </span>
             </div>
           ))}
 
@@ -474,25 +646,104 @@ export default function AvatarsPage() {
         </h2>
         <p className="mb-4 text-sm text-zinc-400">
           Un échantillon de 10 à 30 secondes de votre voix est nécessaire pour le clone vocal.
-          Parlez naturellement dans un environnement calme.
+          Parlez naturellement dans un environnement calme. Formats : WAV, MP3, OGG, FLAC.
         </p>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-              <Mic className="h-5 w-5 text-green-400" />
+        {voiceError && (
+          <p className="mb-4 rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-400">{voiceError}</p>
+        )}
+
+        <div className="space-y-3">
+          {voiceSamples.map((sample) => (
+            <div
+              key={sample.name}
+              className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+            >
+              <button
+                onClick={() => togglePlayVoice(sample.url)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/10 hover:bg-green-500/20"
+              >
+                {playingVoice === sample.url ? (
+                  <Pause className="h-4 w-4 text-green-400" />
+                ) : (
+                  <Play className="h-4 w-4 text-green-400" />
+                )}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-sm font-medium text-white">{sample.name}</p>
+                <p className="text-xs text-zinc-500">
+                  {sample.source === "r2" ? "Stocké en ligne" : "Sur la VM GPU"}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteVoiceSample(sample.name)}
+                className="rounded-lg p-2 text-zinc-500 hover:bg-red-900/30 hover:text-red-400"
+                title="Supprimer"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-white">Voix de Benjamin</p>
-              <p className="text-xs text-zinc-500">
-                L&apos;échantillon vocal est stocké sur la VM GPU. Démarrez la VM pour
-                gérer vos échantillons.
-              </p>
+          ))}
+
+          {/* Recording UI */}
+          {recording ? (
+            <div className="flex items-center gap-4 rounded-xl border-2 border-red-500/50 bg-red-500/5 p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/20">
+                <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-white">
+                  Enregistrement en cours... {formatTime(recordingTime)}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {recordingTime < 10
+                    ? `Encore ${10 - recordingTime}s minimum`
+                    : recordingTime < 30
+                      ? "Bonne durée ! Vous pouvez arrêter ou continuer"
+                      : "30s atteintes, durée idéale"}
+                </p>
+              </div>
+              <button
+                onClick={stopRecording}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                <Square className="h-4 w-4" />
+                Arrêter
+              </button>
             </div>
-            <button className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-700 hover:text-white">
-              <Upload className="h-4 w-4" />
-            </button>
-          </div>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={startRecording}
+                disabled={uploadingVoice}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
+              >
+                <Mic className="h-5 w-5" />
+                <span className="text-sm">Enregistrer avec le micro</span>
+              </button>
+              <button
+                onClick={() => voiceFileRef.current?.click()}
+                disabled={uploadingVoice}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
+              >
+                {uploadingVoice ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Upload className="h-5 w-5" />
+                )}
+                <span className="text-sm">
+                  {uploadingVoice ? "Upload..." : "Importer un fichier"}
+                </span>
+              </button>
+            </div>
+          )}
+          <input
+            ref={voiceFileRef}
+            type="file"
+            accept="audio/wav,audio/mpeg,audio/mp3,audio/ogg,audio/flac,.wav,.mp3,.ogg,.flac"
+            onChange={handleVoiceUpload}
+            className="hidden"
+          />
         </div>
       </section>
 
