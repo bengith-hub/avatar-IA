@@ -7,6 +7,8 @@ interface Avatar {
   id: string;
   name: string;
   type: string;
+  source?: string;
+  url?: string;
 }
 
 interface AstriaResult {
@@ -437,13 +439,28 @@ export default function AvatarsPage() {
           {avatars.map((avatar) => (
             <div
               key={avatar.id}
-              className="flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+              className="group relative flex flex-col items-center rounded-xl border border-zinc-800 bg-zinc-900 p-4"
             >
-              <div className="mb-2 flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-zinc-500">
-                {avatar.name.charAt(0)}
-              </div>
+              {avatar.url ? (
+                <button
+                  onClick={() => setPreviewUrl(avatar.url!)}
+                  className="mb-2 h-20 w-20 overflow-hidden rounded-full"
+                >
+                  <img
+                    src={avatar.url}
+                    alt={avatar.name}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              ) : (
+                <div className="mb-2 flex h-20 w-20 items-center justify-center rounded-full bg-zinc-800 text-2xl font-bold text-zinc-500">
+                  {avatar.name.charAt(0)}
+                </div>
+              )}
               <span className="text-sm font-medium text-white">{avatar.name}</span>
-              <span className="text-xs text-zinc-500">{avatar.type}</span>
+              <span className="text-xs text-zinc-500">
+                {avatar.source === "r2" ? "Stocké en ligne" : avatar.type}
+              </span>
             </div>
           ))}
 
