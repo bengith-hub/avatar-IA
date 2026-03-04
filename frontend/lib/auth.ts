@@ -1,9 +1,12 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { createHash } from "crypto";
 
-function sha256(input: string): string {
-  return createHash("sha256").update(input).digest("hex");
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -26,7 +29,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!expectedUser || !expectedHash) return null;
 
         if (username !== expectedUser) return null;
-        if (sha256(password) !== expectedHash) return null;
+        if ((await sha256(password)) !== expectedHash) return null;
 
         return { id: "1", name: username };
       },
