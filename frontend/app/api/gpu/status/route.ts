@@ -18,12 +18,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
-    const isNetworkError =
+    const isUnavailable =
       message.includes("fetch failed") ||
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
-      message.includes("UND_ERR");
-    if (isNetworkError) {
+      message.includes("UND_ERR") ||
+      message.includes("is not set");
+    if (isUnavailable) {
       return NextResponse.json(
         { error: "VM GPU éteinte — démarrez-la d'abord" },
         { status: 503 }

@@ -18,7 +18,7 @@ function optional(name: string, fallback = ""): string {
 
 export const env = {
   // Auth
-  get nextauthSecret() { return required("NEXTAUTH_SECRET"); },
+  get authSecret() { return process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || ""; },
   get nextauthUrl() { return optional("NEXTAUTH_URL", "http://localhost:3000"); },
   get authUsername() { return required("AUTH_USERNAME"); },
   get authPasswordHash() { return required("AUTH_PASSWORD_HASH"); },
@@ -60,7 +60,10 @@ export function checkEnvStatus(): Record<string, { configured: boolean; vars: st
   });
 
   return {
-    auth: check("NEXTAUTH_SECRET", "AUTH_USERNAME", "AUTH_PASSWORD_HASH"),
+    auth: {
+      configured: !!(process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET) && !!process.env.AUTH_USERNAME && !!process.env.AUTH_PASSWORD_HASH,
+      vars: ["AUTH_SECRET", "AUTH_USERNAME", "AUTH_PASSWORD_HASH"],
+    },
     vast: check("VAST_API_KEY", "VAST_INSTANCE_ID"),
     worker: check("GPU_WORKER_URL", "GPU_WORKER_TOKEN"),
     pexels: check("PEXELS_API_KEY"),

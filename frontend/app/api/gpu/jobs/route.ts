@@ -13,12 +13,13 @@ export async function GET() {
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
-    const isNetworkError =
+    const isUnavailable =
       message.includes("fetch failed") ||
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
-      message.includes("UND_ERR");
-    if (isNetworkError) {
+      message.includes("UND_ERR") ||
+      message.includes("is not set");
+    if (isUnavailable) {
       return NextResponse.json([]);
     }
     return NextResponse.json({ error: message }, { status: 500 });

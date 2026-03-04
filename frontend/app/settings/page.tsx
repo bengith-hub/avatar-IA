@@ -163,7 +163,7 @@ export default function SettingsPage() {
             </thead>
             <tbody className="text-zinc-300">
               {[
-                { var: "NEXTAUTH_SECRET", service: "Auth", required: true, group: "auth" },
+                { var: "AUTH_SECRET", service: "Auth", required: true, group: "auth" },
                 { var: "AUTH_USERNAME", service: "Auth", required: true, group: "auth" },
                 { var: "AUTH_PASSWORD_HASH", service: "Auth", required: true, group: "auth" },
                 { var: "VAST_API_KEY", service: "Vast.ai", required: true, group: "vast" },
