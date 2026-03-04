@@ -4,3 +4,10 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 python-multipart==0.0.20
 python-dotenv==1.0.1
+
+# AI dependencies (installed via setup.sh on GPU VM)
+# fish-speech and HunyuanVideo-Avatar are installed from source
+# with their own dependencies (torch, transformers, etc.)
+# The following are additional utilities used by the worker:
+httpx==0.28.1
+aiofiles==24.1.0
