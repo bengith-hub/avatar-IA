@@ -17,12 +17,9 @@ export async function GET(request: Request) {
       getBilling(),
     ]);
 
-    // Return raw API responses for debugging
-    if (debug) {
-      return NextResponse.json({ _debug: true, instance, billing });
-    }
-
+    // TEMP DEBUG: always include raw data
     return NextResponse.json({
+      _raw: { instance, billing },
       instance: {
         id: instance.id,
         status: instance.actual_status ?? instance.intended_status ?? instance.cur_state ?? "unknown",
