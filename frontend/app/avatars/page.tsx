@@ -48,26 +48,52 @@ export default function AvatarsPage() {
     fetchAvatars();
   }, []);
 
-  // Poll Astria status
+  // Poll Astria status with timeout
+  const pollStartRef = useRef<number>(0);
+
   useEffect(() => {
-    if (!astriaResult || astriaResult.status === "processed" || astriaResult.status === "error") return;
+    if (!astriaResult || !astriaGenerating) return;
+
+    const isComplete = (data: AstriaResult) =>
+      data.status === "processed" ||
+      data.status === "error" ||
+      (data.images && data.images.length > 0);
+
+    if (isComplete(astriaResult)) {
+      setAstriaGenerating(false);
+      return;
+    }
+
+    if (!pollStartRef.current) pollStartRef.current = Date.now();
+    const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
     const interval = setInterval(async () => {
+      if (Date.now() - pollStartRef.current > TIMEOUT_MS) {
+        setAstriaGenerating(false);
+        setAstriaError("Timeout : la génération a pris trop de temps. Vérifiez sur astria.ai.");
+        pollStartRef.current = 0;
+        return;
+      }
       try {
         const res = await fetch(`/api/astria/status?prompt_id=${astriaResult.id}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          setAstriaError(errData.error || `Erreur polling (${res.status})`);
+          return;
+        }
         const data = await res.json();
         setAstriaResult(data);
-        if (data.status === "processed" || data.status === "error") {
+        if (isComplete(data)) {
           setAstriaGenerating(false);
+          pollStartRef.current = 0;
         }
-      } catch {
-        // ignore polling errors
+      } catch (err) {
+        setAstriaError(err instanceof Error ? err.message : "Erreur réseau pendant le polling");
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [astriaResult]);
+  }, [astriaResult, astriaGenerating]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -104,6 +130,7 @@ export default function AvatarsPage() {
     setAstriaError("");
     setAstriaResult(null);
     setSelectedImages(new Set());
+    pollStartRef.current = Date.now();
 
     try {
       const res = await fetch("/api/astria/generate", {
