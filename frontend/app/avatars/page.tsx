@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save, Play, Pause } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, MicOff, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save, Play, Pause, Square } from "lucide-react";
 
 interface Avatar {
   id: string;
@@ -60,8 +60,13 @@ export default function AvatarsPage() {
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [voiceError, setVoiceError] = useState("");
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
   const voiceFileRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchVoiceSamples = async () => {
     try {
@@ -129,6 +134,79 @@ export default function AvatarsPage() {
     } catch {
       // Silently fail
     }
+  };
+
+  const startRecording = async () => {
+    setVoiceError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
+      recordingChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordingChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        setRecordingTime(0);
+
+        const blob = new Blob(recordingChunksRef.current, { type: "audio/webm" });
+        if (blob.size === 0) return;
+
+        const timestamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+        const file = new File([blob], `enregistrement-${timestamp}.webm`, {
+          type: "audio/webm",
+        });
+
+        setUploadingVoice(true);
+        try {
+          const formData = new FormData();
+          formData.append("file", file);
+          const res = await fetch("/api/gpu/voice", {
+            method: "POST",
+            body: formData,
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error ?? "Upload échoué");
+          }
+          await fetchVoiceSamples();
+        } catch (err) {
+          setVoiceError(err instanceof Error ? err.message : "Erreur upload");
+        } finally {
+          setUploadingVoice(false);
+        }
+      };
+
+      mediaRecorder.start(250);
+      mediaRecorderRef.current = mediaRecorder;
+      setRecording(true);
+      setRecordingTime(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((t) => t + 1);
+      }, 1000);
+    } catch {
+      setVoiceError("Impossible d\u2019acc\u00e9der au micro. V\u00e9rifiez les permissions du navigateur.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
   };
 
   const fetchAvatars = async () => {
@@ -607,21 +685,58 @@ export default function AvatarsPage() {
             </div>
           ))}
 
-          {/* Upload button */}
-          <button
-            onClick={() => voiceFileRef.current?.click()}
-            disabled={uploadingVoice}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
-          >
-            {uploadingVoice ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Upload className="h-5 w-5" />
-            )}
-            <span className="text-sm">
-              {uploadingVoice ? "Upload en cours..." : "Ajouter un échantillon vocal"}
-            </span>
-          </button>
+          {/* Recording UI */}
+          {recording ? (
+            <div className="flex items-center gap-4 rounded-xl border-2 border-red-500/50 bg-red-500/5 p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/20">
+                <div className="h-3 w-3 animate-pulse rounded-full bg-red-500" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-white">
+                  Enregistrement en cours... {formatTime(recordingTime)}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {recordingTime < 10
+                    ? `Encore ${10 - recordingTime}s minimum`
+                    : recordingTime < 30
+                      ? "Bonne durée ! Vous pouvez arrêter ou continuer"
+                      : "30s atteintes, durée idéale"}
+                </p>
+              </div>
+              <button
+                onClick={stopRecording}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+              >
+                <Square className="h-4 w-4" />
+                Arrêter
+              </button>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={startRecording}
+                disabled={uploadingVoice}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
+              >
+                <Mic className="h-5 w-5" />
+                <span className="text-sm">Enregistrer avec le micro</span>
+              </button>
+              <button
+                onClick={() => voiceFileRef.current?.click()}
+                disabled={uploadingVoice}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
+              >
+                {uploadingVoice ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <Upload className="h-5 w-5" />
+                )}
+                <span className="text-sm">
+                  {uploadingVoice ? "Upload..." : "Importer un fichier"}
+                </span>
+              </button>
+            </div>
+          )}
           <input
             ref={voiceFileRef}
             type="file"

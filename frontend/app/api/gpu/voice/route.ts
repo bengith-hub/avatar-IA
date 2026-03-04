@@ -104,10 +104,10 @@ export async function POST(req: NextRequest) {
     const fileName = file instanceof File ? file.name : "voice-sample.wav";
 
     // Validate audio type
-    const validTypes = ["audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg", "audio/flac", "audio/x-wav", "audio/wave"];
+    const validTypes = ["audio/wav", "audio/mpeg", "audio/mp3", "audio/ogg", "audio/flac", "audio/x-wav", "audio/wave", "audio/webm"];
     if (!validTypes.some((t) => file.type.startsWith(t.split("/")[0]))) {
       return NextResponse.json(
-        { error: "Format audio non supporté. Utilisez WAV, MP3, OGG ou FLAC." },
+        { error: "Format audio non supporté. Utilisez WAV, MP3, OGG, FLAC ou WebM." },
         { status: 400 }
       );
     }
