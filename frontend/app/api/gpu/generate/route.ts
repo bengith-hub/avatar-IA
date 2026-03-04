@@ -54,7 +54,7 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
   // Upload to worker
   const workerUrl = process.env.GPU_WORKER_URL!.replace(/\/$/, "");
   const form = new FormData();
-  form.append("file", new Blob([bytes]), filename);
+  form.append("file", new Blob([Buffer.from(bytes)]), filename);
 
   const uploadRes = await fetch(`${workerUrl}/avatars`, {
     method: "POST",
