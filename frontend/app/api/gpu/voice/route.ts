@@ -5,7 +5,6 @@ import {
   PutObjectCommand,
   ListObjectsV2Command,
   DeleteObjectCommand,
-  GetObjectCommand,
 } from "@aws-sdk/client-s3";
 
 const PREFIX = "voice-samples/";
@@ -33,9 +32,8 @@ function bucket(): string {
   return process.env.R2_BUCKET ?? "avatar-videos";
 }
 
-function publicUrl(key: string): string {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  return `https://${bucket()}.${accountId}.r2.dev/${key}`;
+function proxyUrl(key: string): string {
+  return `/api/r2/${key}`;
 }
 
 export async function GET() {
@@ -74,7 +72,7 @@ export async function GET() {
         const filename = key.replace(PREFIX, "");
         return {
           name: filename,
-          url: publicUrl(key),
+          url: proxyUrl(key),
           size: obj.Size ?? 0,
           uploadedAt: obj.LastModified?.toISOString() ?? "",
           source: "r2",
@@ -149,7 +147,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       name: fileName,
-      url: publicUrl(key),
+      url: proxyUrl(key),
       source: "r2",
     });
   } catch (error) {
