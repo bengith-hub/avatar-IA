@@ -13,22 +13,42 @@ export async function generateScript(prompt: string): Promise<string> {
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [
         {
           role: "user",
-          content: `Tu es un rédacteur de scripts vidéo pour Benjamin, fondateur d'Amarillo Search (recrutement IT, Toulouse).
-Écris un script court (15-60 secondes de parole) pour une vidéo avatar LinkedIn/Reels.
+          content: `Tu es un réalisateur et scénariste vidéo professionnel.
+Écris un script vidéo complet (15-60 secondes) pour une vidéo avatar destinée aux réseaux sociaux (LinkedIn, Reels, TikTok, YouTube Shorts, etc.).
+
+FORMAT OBLIGATOIRE — utilise exactement cette structure :
+
+TITRE : [titre accrocheur de la vidéo]
+DURÉE : [durée estimée]
+TON : [ton choisi : professionnel / éducatif / inspirant / humoristique / storytelling]
+
+---
+
+[SCÈNE 1 — description visuelle : décor suggéré, cadrage, ambiance]
+TEXTE : « Le texte exact que l'avatar doit prononcer pour cette scène. »
+
+[SCÈNE 2 — description visuelle]
+TEXTE : « Suite du texte parlé. »
+
+(autant de scènes que nécessaire)
+
+---
+
+NOTES DE PRODUCTION :
+- [suggestions de musique, transitions, textes à l'écran, etc.]
 
 Consignes :
-- Ton professionnel mais accessible
+- Adapte le ton au sujet
+- Le texte entre guillemets « » doit être prêt à être lu tel quel par l'avatar
+- Les descriptions de scènes servent de guide pour le montage dans Canva
 - Phrases courtes et percutantes
-- Pas de jargon inutile
-- Le script doit être prêt à être lu tel quel par l'avatar
+- Tu peux traiter n'importe quel sujet : business, tech, lifestyle, éducation, actualité, storytelling, motivation, etc.
 
-Sujet demandé : ${prompt}
-
-Écris uniquement le script (le texte à prononcer), sans indication de scène ni commentaire.`,
+Sujet demandé : ${prompt}`,
         },
       ],
     }),
