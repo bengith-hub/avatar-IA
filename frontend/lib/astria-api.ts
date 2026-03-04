@@ -31,12 +31,17 @@ export async function generateAstriaImages(
   text: string,
   numImages: number = 4
 ): Promise<AstriaPrompt> {
+  const TRIGGER_TOKEN = "ohwx man";
+  const promptText = text.toLowerCase().includes(TRIGGER_TOKEN)
+    ? text
+    : `${TRIGGER_TOKEN} ${text}`;
+
   const res = await fetch(`${ASTRIA_BASE}/tunes/${tuneId()}/prompts`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
       prompt: {
-        text,
+        text: promptText,
         num_images: numImages,
         super_resolution: false,
         face_correct: true,
