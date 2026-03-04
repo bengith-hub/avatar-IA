@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn, Trash2, Save, Play, Pause } from "lucide-react";
 
 interface Avatar {
   id: string;
@@ -55,6 +55,82 @@ export default function AvatarsPage() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
 
+  // Voice sample state
+  const [voiceSamples, setVoiceSamples] = useState<{ name: string; url: string; source?: string }[]>([]);
+  const [uploadingVoice, setUploadingVoice] = useState(false);
+  const [voiceError, setVoiceError] = useState("");
+  const [playingVoice, setPlayingVoice] = useState<string | null>(null);
+  const voiceFileRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const fetchVoiceSamples = async () => {
+    try {
+      const res = await fetch("/api/gpu/voice");
+      if (!res.ok) return;
+      const data = await res.json();
+      setVoiceSamples(Array.isArray(data) ? data : []);
+    } catch {
+      // Silently fail
+    }
+  };
+
+  const handleVoiceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingVoice(true);
+    setVoiceError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch("/api/gpu/voice", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Upload échoué");
+      }
+
+      await fetchVoiceSamples();
+    } catch (err) {
+      setVoiceError(err instanceof Error ? err.message : "Erreur");
+    } finally {
+      setUploadingVoice(false);
+      if (voiceFileRef.current) voiceFileRef.current.value = "";
+    }
+  };
+
+  const togglePlayVoice = (url: string) => {
+    if (playingVoice === url) {
+      audioRef.current?.pause();
+      setPlayingVoice(null);
+      return;
+    }
+    if (audioRef.current) audioRef.current.pause();
+    const audio = new Audio(url);
+    audio.onended = () => setPlayingVoice(null);
+    audio.play();
+    audioRef.current = audio;
+    setPlayingVoice(url);
+  };
+
+  const deleteVoiceSample = async (name: string) => {
+    try {
+      await fetch("/api/gpu/voice", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      await fetchVoiceSamples();
+    } catch {
+      // Silently fail
+    }
+  };
+
   const fetchAvatars = async () => {
     setLoading(true);
     try {
@@ -72,6 +148,7 @@ export default function AvatarsPage() {
 
   useEffect(() => {
     fetchAvatars();
+    fetchVoiceSamples();
     setSavedImages(loadSavedImages());
   }, []);
 
@@ -491,25 +568,67 @@ export default function AvatarsPage() {
         </h2>
         <p className="mb-4 text-sm text-zinc-400">
           Un échantillon de 10 à 30 secondes de votre voix est nécessaire pour le clone vocal.
-          Parlez naturellement dans un environnement calme.
+          Parlez naturellement dans un environnement calme. Formats : WAV, MP3, OGG, FLAC.
         </p>
 
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/10">
-              <Mic className="h-5 w-5 text-green-400" />
+        {voiceError && (
+          <p className="mb-4 rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-400">{voiceError}</p>
+        )}
+
+        <div className="space-y-3">
+          {voiceSamples.map((sample) => (
+            <div
+              key={sample.name}
+              className="flex items-center gap-4 rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+            >
+              <button
+                onClick={() => togglePlayVoice(sample.url)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/10 hover:bg-green-500/20"
+              >
+                {playingVoice === sample.url ? (
+                  <Pause className="h-4 w-4 text-green-400" />
+                ) : (
+                  <Play className="h-4 w-4 text-green-400" />
+                )}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="truncate text-sm font-medium text-white">{sample.name}</p>
+                <p className="text-xs text-zinc-500">
+                  {sample.source === "r2" ? "Stocké en ligne" : "Sur la VM GPU"}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteVoiceSample(sample.name)}
+                className="rounded-lg p-2 text-zinc-500 hover:bg-red-900/30 hover:text-red-400"
+                title="Supprimer"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
             </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-white">Voix de Benjamin</p>
-              <p className="text-xs text-zinc-500">
-                L&apos;échantillon vocal est stocké sur la VM GPU. Démarrez la VM pour
-                gérer vos échantillons.
-              </p>
-            </div>
-            <button className="rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-700 hover:text-white">
-              <Upload className="h-4 w-4" />
-            </button>
-          </div>
+          ))}
+
+          {/* Upload button */}
+          <button
+            onClick={() => voiceFileRef.current?.click()}
+            disabled={uploadingVoice}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-700 p-4 text-zinc-500 transition-colors hover:border-green-500 hover:text-green-400"
+          >
+            {uploadingVoice ? (
+              <Loader2 className="h-5 w-5 animate-spin" />
+            ) : (
+              <Upload className="h-5 w-5" />
+            )}
+            <span className="text-sm">
+              {uploadingVoice ? "Upload en cours..." : "Ajouter un échantillon vocal"}
+            </span>
+          </button>
+          <input
+            ref={voiceFileRef}
+            type="file"
+            accept="audio/wav,audio/mpeg,audio/mp3,audio/ogg,audio/flac,.wav,.mp3,.ogg,.flac"
+            onChange={handleVoiceUpload}
+            className="hidden"
+          />
         </div>
       </section>
 
