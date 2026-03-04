@@ -17,9 +17,7 @@ export async function GET(request: Request) {
       getBilling(),
     ]);
 
-    // TEMP DEBUG: always include raw data
     return NextResponse.json({
-      _raw: { instance, billing },
       instance: {
         id: instance.id,
         status: instance.actual_status ?? instance.intended_status ?? instance.cur_state ?? "unknown",
@@ -30,8 +28,8 @@ export async function GET(request: Request) {
         start_date: instance.start_date ?? null,
       },
       billing: {
-        balance: billing.balance ?? billing.credit ?? null,
-        total_spent: billing.total_spent ?? billing.charged ?? null,
+        balance: billing.credit ?? billing.balance ?? 0,
+        total_spent: billing.total_spend != null ? Math.abs(billing.total_spend) : null,
       },
     });
   } catch (error) {
