@@ -35,6 +35,7 @@ const GpuStatusCard = () => {
   const [error, setError] = useState("");
   const [autoStopMinutes, setAutoStopMinutes] = useState(30);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -50,12 +51,14 @@ const GpuStatusCard = () => {
       } else if (data.instance?.status !== "running") {
         setStartedAt(null);
       }
+      // Clear success message once status reflects the change
+      if (successMessage) setSuccessMessage("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
       setLoading(false);
     }
-  }, [startedAt]);
+  }, [startedAt, successMessage]);
 
   useEffect(() => {
     fetchStatus();
@@ -85,15 +88,24 @@ const GpuStatusCard = () => {
 
   const handleAction = async (action: "start" | "stop") => {
     setActionLoading(true);
+    setError("");
+    setSuccessMessage("");
     try {
       const res = await fetch(`/api/vast/${action}`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || `Échec ${action}`);
       }
-      if (action === "start") setStartedAt(Date.now());
-      if (action === "stop") setStartedAt(null);
-      await fetchStatus();
+      if (action === "start") {
+        setStartedAt(Date.now());
+        setSuccessMessage("Démarrage demandé — la VM s'allume...");
+      }
+      if (action === "stop") {
+        setStartedAt(null);
+        setSuccessMessage("Arrêt demandé — la VM s'éteint...");
+      }
+      // Wait a bit before refreshing so Vast.ai has time to update
+      setTimeout(() => fetchStatus(), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
     } finally {
@@ -146,6 +158,12 @@ const GpuStatusCard = () => {
       {error && (
         <p className="mb-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-400">
           {error}
+        </p>
+      )}
+
+      {successMessage && (
+        <p className="mb-4 rounded-lg bg-green-500/10 px-3 py-2 text-sm text-green-400">
+          {successMessage}
         </p>
       )}
 
@@ -214,7 +232,11 @@ const GpuStatusCard = () => {
           disabled={actionLoading || isRunning}
           className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-green-500 disabled:opacity-40"
         >
-          <Power className="h-4 w-4" />
+          {actionLoading ? (
+            <RefreshCw className="h-4 w-4 animate-spin" />
+          ) : (
+            <Power className="h-4 w-4" />
+          )}
           Démarrer
         </button>
         <button
@@ -222,7 +244,11 @@ const GpuStatusCard = () => {
           disabled={actionLoading || isStopped}
           className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:opacity-40"
         >
-          <PowerOff className="h-4 w-4" />
+          {actionLoading ? (
+            <RefreshCw className="h-4 w-4 animate-spin" />
+          ) : (
+            <PowerOff className="h-4 w-4" />
+          )}
           Arrêter
         </button>
       </div>
