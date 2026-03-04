@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
           method: "POST",
           headers: {
             Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
+            "ngrok-skip-browser-warning": "true",
           },
           body: workerForm,
         });
