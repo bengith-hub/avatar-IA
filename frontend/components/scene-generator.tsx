@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Loader2, Play, Sparkles } from "lucide-react";
+import { Loader2, Play, Sparkles, FileText, MessageSquare } from "lucide-react";
 import AvatarSelector from "@/components/avatar-selector";
 import BackgroundPicker from "@/components/background-picker";
 import ScriptAssistant from "@/components/script-assistant";
@@ -35,6 +35,16 @@ const FORMATS = [
   { id: "16:9", label: "16:9 (paysage)" },
   { id: "9:16", label: "9:16 (portrait)" },
 ];
+
+function extractSpokenText(script: string): string {
+  const lines: string[] = [];
+  const regex = /TEXTE\s*:\s*[«""]([^»""]+)[»""]/g;
+  let match;
+  while ((match = regex.exec(script)) !== null) {
+    lines.push(match[1].trim());
+  }
+  return lines.length > 0 ? lines.join("\n\n") : script;
+}
 
 interface JobStatus {
   job_id: string;
@@ -143,15 +153,26 @@ const SceneGenerator = () => {
   const isCompleted = jobStatus?.status === "completed";
   const progress = jobStatus?.progress ?? 0;
 
+  const [script, setScript] = useState("");
   const [showAssistant, setShowAssistant] = useState(false);
+
+  const handleExtractSpoken = () => {
+    const spoken = extractSpokenText(script);
+    setText(spoken);
+  };
+
+  const handleUseFullScript = () => {
+    setText(script);
+  };
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Text input */}
+      {/* Script input */}
       <div>
         <div className="mb-2 flex items-center justify-between">
           <label className="text-sm font-medium text-zinc-300">
-            Texte à dire
+            <FileText className="mr-1.5 inline h-4 w-4" />
+            Script
           </label>
           <button
             type="button"
@@ -163,19 +184,54 @@ const SceneGenerator = () => {
           </button>
         </div>
         <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="Collez ou tapez le texte que l'avatar doit prononcer..."
+          value={script}
+          onChange={(e) => setScript(e.target.value)}
+          placeholder="Collez votre script ici (avec directions de scène, TEXTE :, etc.)..."
           rows={6}
           className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500"
         />
-        <p className="mt-1 text-xs text-zinc-500">{text.length} / 5000 caractères</p>
+        {script.trim() && (
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              onClick={handleExtractSpoken}
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+            >
+              <MessageSquare className="h-3 w-3" />
+              Extraire le texte parlé
+            </button>
+            <button
+              type="button"
+              onClick={handleUseFullScript}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:bg-zinc-600"
+            >
+              <FileText className="h-3 w-3" />
+              Utiliser tel quel
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Script assistant (collapsible) */}
       {showAssistant && (
-        <ScriptAssistant onInsert={(script) => setText(script)} />
+        <ScriptAssistant onInsert={(s) => setScript(s)} />
       )}
+
+      {/* Texte à dire (spoken text) */}
+      <div>
+        <label className="mb-2 block text-sm font-medium text-zinc-300">
+          <MessageSquare className="mr-1.5 inline h-4 w-4" />
+          Texte à dire (envoyé à l&apos;avatar)
+        </label>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Le texte que l'avatar va prononcer apparaîtra ici..."
+          rows={4}
+          className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-blue-500"
+        />
+        <p className="mt-1 text-xs text-zinc-500">{text.length} / 5000 caractères</p>
+      </div>
 
       {/* Language + Emotion + Format */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
