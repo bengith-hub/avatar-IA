@@ -11,10 +11,59 @@ function workerHeaders(): HeadersInit {
   };
 }
 
+function isOfflineError(status: number, body: string): boolean {
+  return (
+    body.includes("ERR_NGROK") ||
+    body.includes("is offline") ||
+    body.includes("tunnel") ||
+    body.includes("<!DOCTYPE") ||
+    body.includes("<html")
+  );
+}
+
+function workerError(action: string, status: number, body: string): Error {
+  if (isOfflineError(status, body)) {
+    return new Error(
+      "La VM GPU est éteinte ou le tunnel est inactif. Démarrez la VM depuis le Dashboard avant de générer."
+    );
+  }
+  // Try to extract JSON error message
+  try {
+    const json = JSON.parse(body);
+    if (json.detail) return new Error(json.detail);
+    if (json.error) return new Error(json.error);
+  } catch {
+    // Not JSON
+  }
+  return new Error(`Erreur worker ${action} (${status})`);
+}
+
+function connectionError(action: string, err: unknown): Error {
+  const msg = err instanceof Error ? err.message : "";
+  if (
+    msg.includes("fetch failed") ||
+    msg.includes("ECONNREFUSED") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("ENOTFOUND")
+  ) {
+    return new Error(
+      "Impossible de joindre la VM GPU. Vérifiez qu'elle est démarrée et que le tunnel est actif."
+    );
+  }
+  return err instanceof Error ? err : new Error("Erreur inconnue");
+}
+
 export async function workerHealth() {
-  const res = await fetch(`${workerUrl()}/health`);
-  if (!res.ok) throw new Error(`Worker health failed (${res.status})`);
-  return res.json();
+  try {
+    const res = await fetch(`${workerUrl()}/health`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw workerError("health", res.status, body);
+    }
+    return res.json();
+  } catch (err) {
+    throw connectionError("health", err);
+  }
 }
 
 export async function generateVideo(body: {
@@ -25,46 +74,78 @@ export async function generateVideo(body: {
   emotion?: string;
   format?: string;
 }) {
-  const res = await fetch(`${workerUrl()}/generate`, {
-    method: "POST",
-    headers: workerHeaders(),
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Worker generate failed (${res.status}): ${text}`);
+  try {
+    const res = await fetch(`${workerUrl()}/generate`, {
+      method: "POST",
+      headers: workerHeaders(),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw workerError("generate", res.status, text);
+    }
+    return res.json();
+  } catch (err) {
+    throw connectionError("generate", err);
   }
-  return res.json();
 }
 
 export async function getJobStatus(jobId: string) {
-  const res = await fetch(`${workerUrl()}/status/${jobId}`, {
-    headers: workerHeaders(),
-  });
-  if (!res.ok) throw new Error(`Worker status failed (${res.status})`);
-  return res.json();
+  try {
+    const res = await fetch(`${workerUrl()}/status/${jobId}`, {
+      headers: workerHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw workerError("status", res.status, body);
+    }
+    return res.json();
+  } catch (err) {
+    throw connectionError("status", err);
+  }
 }
 
 export async function listJobs() {
-  const res = await fetch(`${workerUrl()}/jobs`, {
-    headers: workerHeaders(),
-  });
-  if (!res.ok) throw new Error(`Worker jobs failed (${res.status})`);
-  return res.json();
+  try {
+    const res = await fetch(`${workerUrl()}/jobs`, {
+      headers: workerHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw workerError("jobs", res.status, body);
+    }
+    return res.json();
+  } catch (err) {
+    throw connectionError("jobs", err);
+  }
 }
 
 export async function downloadVideo(jobId: string) {
-  const res = await fetch(`${workerUrl()}/download/${jobId}`, {
-    headers: workerHeaders(),
-  });
-  if (!res.ok) throw new Error(`Worker download failed (${res.status})`);
-  return res;
+  try {
+    const res = await fetch(`${workerUrl()}/download/${jobId}`, {
+      headers: workerHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw workerError("download", res.status, body);
+    }
+    return res;
+  } catch (err) {
+    throw connectionError("download", err);
+  }
 }
 
 export async function listAvatars() {
-  const res = await fetch(`${workerUrl()}/avatars`, {
-    headers: workerHeaders(),
-  });
-  if (!res.ok) throw new Error(`Worker avatars failed (${res.status})`);
-  return res.json();
+  try {
+    const res = await fetch(`${workerUrl()}/avatars`, {
+      headers: workerHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw workerError("avatars", res.status, body);
+    }
+    return res.json();
+  } catch (err) {
+    throw connectionError("avatars", err);
+  }
 }
