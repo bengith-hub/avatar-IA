@@ -1,12 +1,18 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2 } from "lucide-react";
 
 interface Avatar {
   id: string;
   name: string;
   type: string;
+}
+
+interface AstriaResult {
+  id: number;
+  images: string[];
+  status: string;
 }
 
 export default function AvatarsPage() {
@@ -15,6 +21,13 @@ export default function AvatarsPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Astria state
+  const [astriaPrompt, setAstriaPrompt] = useState("");
+  const [astriaGenerating, setAstriaGenerating] = useState(false);
+  const [astriaResult, setAstriaResult] = useState<AstriaResult | null>(null);
+  const [astriaError, setAstriaError] = useState("");
+  const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
 
   const fetchAvatars = async () => {
     setLoading(true);
@@ -34,6 +47,27 @@ export default function AvatarsPage() {
   useEffect(() => {
     fetchAvatars();
   }, []);
+
+  // Poll Astria status
+  useEffect(() => {
+    if (!astriaResult || astriaResult.status === "processed" || astriaResult.status === "error") return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/astria/status?prompt_id=${astriaResult.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setAstriaResult(data);
+        if (data.status === "processed" || data.status === "error") {
+          setAstriaGenerating(false);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [astriaResult]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -63,6 +97,50 @@ export default function AvatarsPage() {
     }
   };
 
+  const handleAstriaGenerate = async () => {
+    if (!astriaPrompt.trim()) return;
+
+    setAstriaGenerating(true);
+    setAstriaError("");
+    setAstriaResult(null);
+    setSelectedImages(new Set());
+
+    try {
+      const res = await fetch("/api/astria/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: astriaPrompt }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Génération échouée");
+      }
+
+      const data = await res.json();
+      setAstriaResult(data);
+    } catch (err) {
+      setAstriaError(err instanceof Error ? err.message : "Erreur");
+      setAstriaGenerating(false);
+    }
+  };
+
+  const toggleImageSelection = (url: string) => {
+    setSelectedImages((prev) => {
+      const next = new Set(prev);
+      if (next.has(url)) next.delete(url);
+      else next.add(url);
+      return next;
+    });
+  };
+
+  const promptSuggestions = [
+    "photo professionnelle, costume bleu marine, fond blanc studio",
+    "photo casual, polo noir, bureau moderne en arrière-plan",
+    "portrait confiant, chemise blanche, éclairage studio",
+    "photo debout, costume gris, mains dans les poches, fond neutre",
+  ];
+
   return (
     <div className="mx-auto max-w-4xl">
       <div className="mb-6 flex items-center justify-between">
@@ -80,6 +158,119 @@ export default function AvatarsPage() {
         <p className="mb-4 rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>
       )}
 
+      {/* Astria AI Generator */}
+      <section className="mb-8">
+        <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
+          <Sparkles className="h-5 w-5 text-purple-400" />
+          Générer des photos IA (Astria)
+        </h2>
+        <p className="mb-4 text-sm text-zinc-400">
+          Décrivez la tenue et le style souhaités. Astria génère des photos réalistes de vous
+          que vous pouvez utiliser comme avatars.
+        </p>
+
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="mb-3">
+            <textarea
+              value={astriaPrompt}
+              onChange={(e) => setAstriaPrompt(e.target.value)}
+              placeholder="Ex: photo professionnelle, costume bleu marine, fond blanc studio"
+              rows={2}
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-3 text-sm text-white placeholder-zinc-500 focus:border-purple-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Suggestions */}
+          <div className="mb-4 flex flex-wrap gap-2">
+            {promptSuggestions.map((suggestion) => (
+              <button
+                key={suggestion}
+                onClick={() => setAstriaPrompt(suggestion)}
+                className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-400 hover:border-purple-500 hover:text-purple-300"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={handleAstriaGenerate}
+            disabled={astriaGenerating || !astriaPrompt.trim()}
+            className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50"
+          >
+            {astriaGenerating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Génération en cours...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Générer 4 photos
+              </>
+            )}
+          </button>
+
+          {astriaError && (
+            <p className="mt-3 text-sm text-red-400">{astriaError}</p>
+          )}
+
+          {/* Results */}
+          {astriaResult && astriaResult.status === "processed" && astriaResult.images?.length > 0 && (
+            <div className="mt-6">
+              <p className="mb-3 text-sm text-zinc-400">
+                Cliquez sur les photos que vous souhaitez garder comme avatars :
+              </p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {astriaResult.images.map((url, i) => (
+                  <button
+                    key={i}
+                    onClick={() => toggleImageSelection(url)}
+                    className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
+                      selectedImages.has(url)
+                        ? "border-purple-500 ring-2 ring-purple-500/30"
+                        : "border-zinc-700 hover:border-zinc-500"
+                    }`}
+                  >
+                    <img
+                      src={url}
+                      alt={`Génération ${i + 1}`}
+                      className="aspect-square w-full object-cover"
+                    />
+                    {selectedImages.has(url) && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-purple-500/20">
+                        <Check className="h-8 w-8 text-white drop-shadow-lg" />
+                      </div>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {selectedImages.size > 0 && (
+                <p className="mt-3 text-sm text-zinc-400">
+                  {selectedImages.size} photo{selectedImages.size > 1 ? "s" : ""} sélectionnée{selectedImages.size > 1 ? "s" : ""}
+                  — ces images seront utilisables comme avatars quand la VM GPU sera active.
+                </p>
+              )}
+            </div>
+          )}
+
+          {astriaResult && astriaResult.status !== "processed" && astriaResult.status !== "error" && (
+            <div className="mt-4 flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-purple-400" />
+              <p className="text-sm text-zinc-400">
+                Génération en cours... cela peut prendre 1 à 3 minutes.
+              </p>
+            </div>
+          )}
+
+          {astriaResult && astriaResult.status === "error" && (
+            <p className="mt-3 text-sm text-red-400">
+              La génération a échoué. Réessayez avec un autre prompt.
+            </p>
+          )}
+        </div>
+      </section>
+
       {/* Photos de référence */}
       <section className="mb-8">
         <h2 className="mb-4 flex items-center gap-2 text-lg font-semibold">
@@ -87,8 +278,8 @@ export default function AvatarsPage() {
           Photos de référence
         </h2>
         <p className="mb-4 text-sm text-zinc-400">
-          Ajoutez des photos de référence pour l&apos;avatar. Plusieurs poses recommandées :
-          buste, pied, assis.
+          Ajoutez des photos de référence pour l&apos;avatar. Vous pouvez aussi générer des
+          photos avec Astria ci-dessus.
         </p>
 
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">

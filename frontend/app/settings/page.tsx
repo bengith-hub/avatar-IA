@@ -172,6 +172,8 @@ export default function SettingsPage() {
                 { var: "GPU_WORKER_TOKEN", service: "Worker", required: true, group: "worker" },
                 { var: "PEXELS_API_KEY", service: "Pexels", required: true, group: "pexels" },
                 { var: "ANTHROPIC_API_KEY", service: "Anthropic", required: true, group: "anthropic" },
+                { var: "ASTRIA_API_KEY", service: "Astria", required: false, group: "astria" },
+                { var: "ASTRIA_TUNE_ID", service: "Astria", required: false, group: "astria" },
                 { var: "CANVA_ACCESS_TOKEN", service: "Canva", required: false, group: "canva" },
                 { var: "R2_ACCOUNT_ID", service: "R2", required: false, group: "r2" },
                 { var: "R2_ACCESS_KEY", service: "R2", required: false, group: "r2" },

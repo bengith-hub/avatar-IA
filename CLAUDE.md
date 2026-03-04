@@ -43,6 +43,7 @@ avatar-IA/
 | Vast.ai | frontend (API routes) | `VAST_API_KEY` | Start/stop VM, billing |
 | Pexels | frontend (API routes) | `PEXELS_API_KEY` | Recherche décors (photos+vidéos) |
 | Anthropic | frontend (API routes) | `ANTHROPIC_API_KEY` | Génération de scripts IA |
+| Astria | frontend (API routes) | `ASTRIA_API_KEY`, `ASTRIA_TUNE_ID` | Génération photos avatar IA |
 | Canva Connect | frontend (API routes) | `CANVA_*` | Upload clip → ouvrir dans Canva |
 | Cloudflare R2 | frontend (API routes) | `R2_*` | Stockage vidéos (S3-compatible) |
 | Worker GPU | frontend (API routes) | `GPU_WORKER_URL`, `GPU_WORKER_TOKEN` | Proxy vers la VM |
@@ -106,6 +107,10 @@ frontend/
 │       │   └── search/route.ts     ← GET → recherche décors
 │       ├── ai/
 │       │   └── script/route.ts     ← POST → génère script
+│       ├── astria/
+│       │   ├── generate/route.ts   ← POST → lance génération photo Astria
+│       │   ├── status/route.ts     ← GET → statut prompt Astria
+│       │   └── callback/route.ts   ← POST → callback webhook Astria
 │       └── canva/
 │           └── upload/route.ts     ← POST → upload vers Canva
 ├── components/
@@ -123,6 +128,7 @@ frontend/
     ├── pexels-api.ts           ← Client Pexels
     ├── canva-api.ts            ← Client Canva Connect
     ├── anthropic-api.ts        ← Client Anthropic (scripts)
+    ├── astria-api.ts           ← Client Astria (génération photos avatar)
     ├── r2.ts                   ← Client Cloudflare R2
     └── auth.ts                 ← Config NextAuth
 ```
@@ -203,6 +209,8 @@ GPU_WORKER_URL=
 GPU_WORKER_TOKEN=
 PEXELS_API_KEY=
 ANTHROPIC_API_KEY=
+ASTRIA_API_KEY=
+ASTRIA_TUNE_ID=
 CANVA_CLIENT_ID=
 CANVA_CLIENT_SECRET=
 CANVA_ACCESS_TOKEN=
@@ -262,6 +270,12 @@ Ordre strict de construction :
 - **Canva Connect API** : REST + OAuth, docs : https://www.canva.dev/docs/connect/
   - Upload asset : POST avec fichier vidéo
   - Créer design : POST avec asset importé
+- **Astria API** : REST, auth par Bearer token, docs : https://docs.astria.ai/
+  - Base URL : `https://api.astria.ai`
+  - Générer photos : `POST /tunes/{tune_id}/prompts` avec `prompt[text]`, `prompt[num_images]`, `prompt[face_correct]`, `prompt[face_swap]`
+  - Statut : `GET /tunes/{tune_id}/prompts/{prompt_id}`
+  - Le tune_id correspond au modèle fine-tuné sur le visage de Benjamin
+  - Les photos générées servent de référence pour HunyuanVideo-Avatar
 - **HunyuanVideo-Avatar** : inference Python, prend image + audio → génère vidéo
   - Repo : https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar
   - Min VRAM : 10GB (avec TeaCache), recommandé 24GB+
