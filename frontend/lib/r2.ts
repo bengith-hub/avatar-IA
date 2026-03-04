@@ -47,9 +47,7 @@ export async function uploadVideo(
 }
 
 export async function getVideoUrl(key: string): Promise<string> {
-  // R2 public URL (if public access is enabled on the bucket)
-  const accountId = process.env.R2_ACCOUNT_ID;
-  return `https://${bucket()}.${accountId}.r2.dev/${key}`;
+  return `/api/r2/${key}`;
 }
 
 export async function getVideoStream(key: string) {

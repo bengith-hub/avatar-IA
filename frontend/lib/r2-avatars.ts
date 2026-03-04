@@ -30,9 +30,8 @@ function bucket(): string {
   return process.env.R2_BUCKET ?? "avatar-videos";
 }
 
-function publicUrl(key: string): string {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  return `https://${bucket()}.${accountId}.r2.dev/${key}`;
+function proxyUrl(key: string): string {
+  return `/api/r2/${key}`;
 }
 
 export async function uploadToR2(
@@ -61,7 +60,7 @@ export async function uploadToR2(
     name,
     type: ext,
     source: "r2",
-    url: publicUrl(key),
+    url: proxyUrl(key),
   };
 }
 
@@ -88,7 +87,7 @@ export async function listR2Avatars(): Promise<
         name: id,
         type: ext,
         source: "r2",
-        url: publicUrl(key),
+        url: proxyUrl(key),
       };
     });
 }
