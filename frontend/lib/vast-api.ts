@@ -1,4 +1,4 @@
-const VAST_BASE_URL = "https://console.vast.ai";
+const VAST_BASE_URL = "https://cloud.vast.ai";
 
 function vastHeaders(): HeadersInit {
   return {
