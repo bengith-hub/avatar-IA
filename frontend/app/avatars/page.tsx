@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2 } from "lucide-react";
+import { Upload, Plus, UserCircle, Mic, RefreshCw, Sparkles, Check, Loader2, X, ZoomIn } from "lucide-react";
 
 interface Avatar {
   id: string;
@@ -28,6 +28,7 @@ export default function AvatarsPage() {
   const [astriaResult, setAstriaResult] = useState<AstriaResult | null>(null);
   const [astriaError, setAstriaError] = useState("");
   const [selectedImages, setSelectedImages] = useState<Set<string>>(new Set());
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const fetchAvatars = async () => {
     setLoading(true);
@@ -250,26 +251,37 @@ export default function AvatarsPage() {
               </p>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {astriaResult.images.map((url, i) => (
-                  <button
+                  <div
                     key={i}
-                    onClick={() => toggleImageSelection(url)}
                     className={`group relative overflow-hidden rounded-lg border-2 transition-all ${
                       selectedImages.has(url)
                         ? "border-purple-500 ring-2 ring-purple-500/30"
                         : "border-zinc-700 hover:border-zinc-500"
                     }`}
                   >
-                    <img
-                      src={url}
-                      alt={`Génération ${i + 1}`}
-                      className="aspect-square w-full object-cover"
-                    />
+                    <button
+                      onClick={() => toggleImageSelection(url)}
+                      className="w-full"
+                    >
+                      <img
+                        src={url}
+                        alt={`Génération ${i + 1}`}
+                        className="aspect-square w-full object-cover"
+                      />
+                    </button>
                     {selectedImages.has(url) && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-purple-500/20">
+                      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-purple-500/20">
                         <Check className="h-8 w-8 text-white drop-shadow-lg" />
                       </div>
                     )}
-                  </button>
+                    <button
+                      onClick={() => setPreviewUrl(url)}
+                      className="absolute right-1 top-1 rounded-full bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/80"
+                      title="Agrandir"
+                    >
+                      <ZoomIn className="h-4 w-4" />
+                    </button>
+                  </div>
                 ))}
               </div>
               {selectedImages.size > 0 && (
@@ -371,6 +383,27 @@ export default function AvatarsPage() {
           </div>
         </div>
       </section>
+
+      {/* Preview modal */}
+      {previewUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setPreviewUrl(null)}
+        >
+          <button
+            onClick={() => setPreviewUrl(null)}
+            className="absolute right-4 top-4 rounded-full bg-zinc-800 p-2 text-white hover:bg-zinc-700"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <img
+            src={previewUrl}
+            alt="Prévisualisation"
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
