@@ -107,6 +107,13 @@ export async function GET() {
     services.push({ name: "Anthropic", status: "not_configured", message: "ANTHROPIC_API_KEY manquant" });
   }
 
+  // Check Astria
+  if (envStatus.astria.configured) {
+    services.push({ name: "Astria", status: "ok", message: "API key et tune ID configurés" });
+  } else {
+    services.push({ name: "Astria", status: "not_configured", message: "ASTRIA_API_KEY ou ASTRIA_TUNE_ID manquant (optionnel)" });
+  }
+
   // Check Canva
   if (envStatus.canva.configured) {
     services.push({ name: "Canva", status: "ok", message: "Token configuré" });

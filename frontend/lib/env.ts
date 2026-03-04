@@ -37,6 +37,10 @@ export const env = {
   // Anthropic
   get anthropicApiKey() { return required("ANTHROPIC_API_KEY"); },
 
+  // Astria
+  get astriaApiKey() { return optional("ASTRIA_API_KEY"); },
+  get astriaTuneId() { return optional("ASTRIA_TUNE_ID"); },
+
   // Canva (optional for MVP)
   get canvaClientId() { return optional("CANVA_CLIENT_ID"); },
   get canvaClientSecret() { return optional("CANVA_CLIENT_SECRET"); },
@@ -68,6 +72,7 @@ export function checkEnvStatus(): Record<string, { configured: boolean; vars: st
     worker: check("GPU_WORKER_URL", "GPU_WORKER_TOKEN"),
     pexels: check("PEXELS_API_KEY"),
     anthropic: check("ANTHROPIC_API_KEY"),
+    astria: check("ASTRIA_API_KEY", "ASTRIA_TUNE_ID"),
     canva: check("CANVA_ACCESS_TOKEN"),
     r2: check("R2_ACCOUNT_ID", "R2_ACCESS_KEY", "R2_SECRET_KEY"),
   };
