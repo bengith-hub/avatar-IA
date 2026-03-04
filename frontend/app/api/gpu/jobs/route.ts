@@ -18,7 +18,10 @@ export async function GET() {
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
       message.includes("UND_ERR") ||
-      message.includes("is not set");
+      message.includes("is not set") ||
+      message.includes("failed (404)") ||
+      message.includes("failed (502)") ||
+      message.includes("failed (503)");
     if (isUnavailable) {
       return NextResponse.json([]);
     }
