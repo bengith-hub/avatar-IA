@@ -9,10 +9,12 @@ from models import GenerateRequest, JobStatus, JobStatusResponse, JobListItem
 class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, dict] = {}
+        self.last_activity: datetime | None = None
 
     def create_job(self, request: GenerateRequest) -> str:
         job_id = uuid.uuid4().hex[:12]
         now = datetime.now(timezone.utc)
+        self.last_activity = now
         self._jobs[job_id] = {
             "job_id": job_id,
             "status": JobStatus.pending,
@@ -59,7 +61,9 @@ class JobManager:
             job["result_url"] = result_url
         if error is not None:
             job["error"] = error
-        job["updated_at"] = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        job["updated_at"] = now
+        self.last_activity = now
 
     def list_jobs(self, limit: int = 50) -> list[JobListItem]:
         sorted_jobs = sorted(
@@ -74,6 +78,14 @@ class JobManager:
             )
             for j in sorted_jobs[:limit]
         ]
+
+
+    def active_jobs_count(self) -> int:
+        return sum(
+            1
+            for j in self._jobs.values()
+            if j["status"] in (JobStatus.pending, JobStatus.processing)
+        )
 
 
 job_manager = JobManager()

@@ -49,6 +49,8 @@ class HealthResponse(BaseModel):
     gpu_memory: str | None = None
     uptime: float
     models_loaded: bool
+    last_activity: datetime | None = None
+    active_jobs: int = 0
 
 
 class AvatarInfo(BaseModel):
