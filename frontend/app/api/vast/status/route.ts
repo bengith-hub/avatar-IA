@@ -14,10 +14,14 @@ export async function GET() {
       getBilling(),
     ]);
 
+    // Debug: log raw responses to help diagnose field mapping issues
+    console.log("[vast/status] instance keys:", Object.keys(instance));
+    console.log("[vast/status] billing keys:", Object.keys(billing));
+
     return NextResponse.json({
       instance: {
         id: instance.id,
-        status: instance.actual_status ?? instance.intended_status ?? "unknown",
+        status: instance.actual_status ?? instance.intended_status ?? instance.cur_state ?? "unknown",
         gpu_name: instance.gpu_name ?? null,
         gpu_ram: instance.gpu_ram ?? null,
         cpu_ram: instance.cpu_ram ?? null,
@@ -25,12 +29,13 @@ export async function GET() {
         start_date: instance.start_date ?? null,
       },
       billing: {
-        balance: billing.balance ?? null,
-        total_spent: billing.total_spent ?? null,
+        balance: billing.balance ?? billing.credit ?? null,
+        total_spent: billing.total_spent ?? billing.charged ?? null,
       },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
+    console.error("[vast/status] error:", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

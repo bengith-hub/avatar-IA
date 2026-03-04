@@ -57,7 +57,9 @@ export async function getInstanceStatus() {
     const text = await res.text();
     throw new Error(`Vast.ai status failed (${res.status}): ${text}`);
   }
-  return res.json();
+  const data = await res.json();
+  // Vast.ai wraps single instance in { instances: { ... } }
+  return data.instances ?? data;
 }
 
 export async function getBilling() {
