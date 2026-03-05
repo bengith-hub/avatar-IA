@@ -30,9 +30,13 @@ export async function GET(request: Request) {
     let reason = "";
 
     try {
-      const health = await workerHealth();
+      const health = await workerHealth() as {
+        active_jobs?: number;
+        last_activity?: string;
+        uptime: number;
+      };
 
-      if (health.active_jobs > 0) {
+      if (health.active_jobs && health.active_jobs > 0) {
         return NextResponse.json({
           action: "none",
           reason: `${health.active_jobs} active job(s), skipping auto-stop`,
