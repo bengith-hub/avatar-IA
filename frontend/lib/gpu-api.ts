@@ -23,6 +23,26 @@ function isOfflineError(status: number, body: string): boolean {
   );
 }
 
+/** Read response body as text and detect ngrok HTML pages (even on 200). */
+async function safeResponseJson(res: Response, action: string): Promise<unknown> {
+  const body = await res.text();
+  if (isOfflineError(res.status, body)) {
+    throw new Error(
+      "La VM GPU est éteinte ou le tunnel est inactif. Démarrez la VM depuis le Dashboard avant de générer."
+    );
+  }
+  if (!res.ok) {
+    throw workerError(action, res.status, body);
+  }
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(
+      `Réponse invalide du worker (${action}). Le tunnel ngrok est peut-être inactif.`
+    );
+  }
+}
+
 function workerError(action: string, status: number, body: string): Error {
   if (isOfflineError(status, body)) {
     return new Error(
@@ -60,11 +80,7 @@ export async function workerHealth() {
     const res = await fetch(`${workerUrl()}/health`, {
       headers: { "ngrok-skip-browser-warning": "true", "User-Agent": "AvatarIA-Worker/1.0" },
     });
-    if (!res.ok) {
-      const body = await res.text();
-      throw workerError("health", res.status, body);
-    }
-    return res.json();
+    return await safeResponseJson(res, "health");
   } catch (err) {
     throw connectionError("health", err);
   }
@@ -84,11 +100,7 @@ export async function generateVideo(body: {
       headers: workerHeaders(),
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const text = await res.text();
-      throw workerError("generate", res.status, text);
-    }
-    return res.json();
+    return await safeResponseJson(res, "generate");
   } catch (err) {
     throw connectionError("generate", err);
   }
@@ -99,11 +111,7 @@ export async function getJobStatus(jobId: string) {
     const res = await fetch(`${workerUrl()}/status/${jobId}`, {
       headers: workerHeaders(),
     });
-    if (!res.ok) {
-      const body = await res.text();
-      throw workerError("status", res.status, body);
-    }
-    return res.json();
+    return await safeResponseJson(res, "status");
   } catch (err) {
     throw connectionError("status", err);
   }
@@ -114,11 +122,7 @@ export async function listJobs() {
     const res = await fetch(`${workerUrl()}/jobs`, {
       headers: workerHeaders(),
     });
-    if (!res.ok) {
-      const body = await res.text();
-      throw workerError("jobs", res.status, body);
-    }
-    return res.json();
+    return await safeResponseJson(res, "jobs");
   } catch (err) {
     throw connectionError("jobs", err);
   }
@@ -131,7 +135,15 @@ export async function downloadVideo(jobId: string) {
     });
     if (!res.ok) {
       const body = await res.text();
+      if (isOfflineError(res.status, body)) {
+        throw new Error("La VM GPU est éteinte ou le tunnel est inactif.");
+      }
       throw workerError("download", res.status, body);
+    }
+    // Check content-type to detect ngrok HTML on 200
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct.includes("text/html")) {
+      throw new Error("La VM GPU est éteinte ou le tunnel est inactif.");
     }
     return res;
   } catch (err) {
@@ -144,11 +156,7 @@ export async function listAvatars() {
     const res = await fetch(`${workerUrl()}/avatars`, {
       headers: workerHeaders(),
     });
-    if (!res.ok) {
-      const body = await res.text();
-      throw workerError("avatars", res.status, body);
-    }
-    return res.json();
+    return await safeResponseJson(res, "avatars");
   } catch (err) {
     throw connectionError("avatars", err);
   }

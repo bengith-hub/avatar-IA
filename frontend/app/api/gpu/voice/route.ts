@@ -117,16 +117,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Try worker first
+    // Try worker first (use base64 JSON to avoid ngrok multipart issues)
     const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
     if (workerUrl) {
       try {
-        const workerForm = new FormData();
-        workerForm.append("file", file);
-        const res = await fetch(`${workerUrl}/voice-samples`, {
+        const arrayBuf = await file.arrayBuffer();
+        const base64Data = Buffer.from(arrayBuf).toString("base64");
+        const res = await fetch(`${workerUrl}/voice-samples/upload-json`, {
           method: "POST",
-          headers: { Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}` },
-          body: workerForm,
+          headers: {
+            Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+            "User-Agent": "AvatarIA-Worker/1.0",
+          },
+          body: JSON.stringify({
+            filename: fileName,
+            data_base64: base64Data,
+          }),
         });
         if (res.ok) {
           const result = await res.json();

@@ -9,7 +9,7 @@ export async function GET() {
   }
 
   try {
-    const data = await workerHealth();
+    const data = await workerHealth() as Record<string, unknown>;
     return NextResponse.json({ connected: true, ...data });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";

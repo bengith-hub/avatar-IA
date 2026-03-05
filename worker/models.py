@@ -67,3 +67,8 @@ class AvatarInfo(BaseModel):
 class AvatarUploadBase64(BaseModel):
     filename: str
     data_base64: str
+
+
+class VoiceUploadBase64(BaseModel):
+    filename: str
+    data_base64: str

@@ -24,6 +24,9 @@ export async function GET(req: NextRequest) {
       message.includes("ETIMEDOUT") ||
       message.includes("UND_ERR") ||
       message.includes("is not set") ||
+      message.includes("VM GPU") ||
+      message.includes("tunnel") ||
+      message.includes("Impossible de joindre") ||
       message.includes("failed (404)") ||
       message.includes("failed (502)") ||
       message.includes("failed (503)");

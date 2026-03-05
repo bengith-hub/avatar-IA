@@ -15,6 +15,7 @@ from models import (
     HealthResponse,
     AvatarInfo,
     AvatarUploadBase64,
+    VoiceUploadBase64,
 )
 from jobs import job_manager
 from pipeline import run_pipeline, tts_engine, avatar_engine
@@ -245,6 +246,28 @@ async def delete_voice_sample(request: Request):
         logger.info("Voice sample deleted: %s", name)
 
     return {"success": True}
+
+
+@app.post("/voice-samples/upload-json")
+async def upload_voice_sample_json(body: VoiceUploadBase64):
+    """Upload voice sample as JSON with base64 data (avoids ngrok multipart issues)."""
+    import base64
+
+    voice_dir = settings.voice_path
+    os.makedirs(voice_dir, exist_ok=True)
+
+    file_path = os.path.join(voice_dir, body.filename)
+    content = base64.b64decode(body.data_base64)
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    logger.info("Voice sample uploaded (JSON): %s (%d bytes)", body.filename, len(content))
+    return {
+        "name": body.filename,
+        "url": f"/voice-samples/{body.filename}",
+        "size": len(content),
+        "source": "worker",
+    }
 
 
 @app.get("/voice-samples/{filename}")
