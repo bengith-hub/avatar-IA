@@ -94,10 +94,28 @@ const SceneGenerator = () => {
     loadAvatars();
   }, []);
 
+  const [pollErrors, setPollErrors] = useState(0);
+  const MAX_POLL_ERRORS = 12; // ~60s of retries before giving up
+
   const pollStatus = useCallback(async (id: string) => {
     try {
       const res = await fetch(`/api/gpu/status?job_id=${id}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        // Don't stop polling on transient errors — retry
+        setPollErrors((prev) => {
+          const next = prev + 1;
+          if (next >= MAX_POLL_ERRORS) {
+            setError("Impossible de récupérer le statut du job. Vérifiez la VM.");
+            setGenerating(false);
+          }
+          return next;
+        });
+        setTimeout(() => pollStatus(id), 5000);
+        return;
+      }
+
+      // Reset error counter on success
+      setPollErrors(0);
       const data: JobStatus = await res.json();
       setJobStatus(data);
 
@@ -111,6 +129,14 @@ const SceneGenerator = () => {
 
       setTimeout(() => pollStatus(id), 5000);
     } catch {
+      setPollErrors((prev) => {
+        const next = prev + 1;
+        if (next >= MAX_POLL_ERRORS) {
+          setError("Connexion perdue avec la VM GPU.");
+          setGenerating(false);
+        }
+        return next;
+      });
       setTimeout(() => pollStatus(id), 5000);
     }
   }, []);
@@ -121,6 +147,7 @@ const SceneGenerator = () => {
     setGenerating(true);
     setJobStatus(null);
     setJobId(null);
+    setPollErrors(0);
 
     try {
       const res = await fetch("/api/gpu/generate", {
@@ -310,7 +337,11 @@ const SceneGenerator = () => {
         <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
           <div className="mb-2 flex items-center justify-between text-sm">
             <span className="text-zinc-400">
-              {jobStatus?.status === "processing" ? "Génération en cours..." : "En attente..."}
+              {pollErrors > 0
+                ? `Reconnexion à la VM... (tentative ${pollErrors}/${MAX_POLL_ERRORS})`
+                : jobStatus?.status === "processing"
+                  ? "Génération en cours..."
+                  : "En attente..."}
             </span>
             <span className="font-medium text-white">{Math.round(progress * 100)}%</span>
           </div>
