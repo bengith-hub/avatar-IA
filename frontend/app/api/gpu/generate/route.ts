@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { generateVideo } from "@/lib/gpu-api";
+import { generateVideo, fetchWorkerVoiceSampleBase64 } from "@/lib/gpu-api";
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,14 +23,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Voice samples are now stored directly on the worker VM (via /voice-samples).
-    // The worker's TTS engine will find them in its voice directory automatically.
-    // Only embed from R2 as a last-resort fallback.
+    // Ensure a voice sample is available for TTS.
+    // Priority: 1) already in body, 2) from worker VM, 3) from R2
     if (!body.voice_sample_base64) {
-      const voiceSample = await fetchR2VoiceSampleBase64Safe();
-      if (voiceSample) {
-        body.voice_sample_base64 = voiceSample.base64;
-        body.voice_sample_filename = voiceSample.filename;
+      console.log("[gpu/generate] No voice in request body, trying worker...");
+      const workerVoice = await fetchWorkerVoiceSampleBase64();
+      if (workerVoice) {
+        console.log("[gpu/generate] Voice found on worker:", workerVoice.filename);
+        body.voice_sample_base64 = workerVoice.base64;
+        body.voice_sample_filename = workerVoice.filename;
+      } else {
+        console.log("[gpu/generate] No voice on worker, trying R2...");
+        const r2Voice = await fetchR2VoiceSampleBase64Safe();
+        if (r2Voice) {
+          console.log("[gpu/generate] Voice found on R2:", r2Voice.filename);
+          body.voice_sample_base64 = r2Voice.base64;
+          body.voice_sample_filename = r2Voice.filename;
+        } else {
+          console.warn("[gpu/generate] WARNING: No voice sample found anywhere!");
+        }
       }
     }
 
@@ -115,7 +126,10 @@ async function fetchR2VoiceSampleBase64Safe(): Promise<{
   base64: string;
   filename: string;
 } | null> {
-  if (!isR2Configured()) return null;
+  if (!isR2Configured()) {
+    console.log("[gpu/generate] R2 not configured, skipping voice fallback");
+    return null;
+  }
 
   try {
     const { S3Client, GetObjectCommand, ListObjectsV2Command } = await import(
@@ -138,8 +152,12 @@ async function fetchR2VoiceSampleBase64Safe(): Promise<{
     );
 
     const obj = listRes.Contents?.find((o) => o.Key && !o.Key.endsWith("/"));
-    if (!obj?.Key) return null;
+    if (!obj?.Key) {
+      console.log("[gpu/generate] No voice sample found on R2 (prefix: voice-samples/)");
+      return null;
+    }
 
+    console.log("[gpu/generate] Found voice sample on R2:", obj.Key);
     const getRes = await client.send(
       new GetObjectCommand({ Bucket: bucket, Key: obj.Key })
     );
@@ -152,7 +170,8 @@ async function fetchR2VoiceSampleBase64Safe(): Promise<{
       base64: Buffer.from(bytes).toString("base64"),
       filename,
     };
-  } catch {
+  } catch (err) {
+    console.error("[gpu/generate] R2 voice fallback error:", err instanceof Error ? err.message : err);
     return null;
   }
 }
