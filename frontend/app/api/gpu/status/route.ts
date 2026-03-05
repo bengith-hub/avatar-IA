@@ -18,24 +18,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
-    const isUnavailable =
+    const isConnError =
       message.includes("fetch failed") ||
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
-      message.includes("UND_ERR") ||
-      message.includes("is not set") ||
-      message.includes("VM GPU") ||
-      message.includes("ngrok") ||
-      message.includes("Impossible de joindre") ||
-      message.includes("failed (404)") ||
-      message.includes("failed (502)") ||
-      message.includes("failed (503)");
-    if (isUnavailable) {
-      return NextResponse.json(
-        { error: "VM GPU éteinte — démarrez-la d'abord" },
-        { status: 503 }
-      );
-    }
-    return NextResponse.json({ error: message }, { status: 500 });
+      message.includes("Connexion refusée") ||
+      message.includes("URL introuvable") ||
+      message.includes("Timeout") ||
+      message.includes("tunnel") ||
+      message.includes("is not set");
+    return NextResponse.json(
+      { error: message },
+      { status: isConnError ? 503 : 500 }
+    );
   }
 }
