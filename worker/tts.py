@@ -3,51 +3,76 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
-import sys
+from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 class TTSEngine:
-    """Interface to FishAudio fish-speech for text-to-speech with voice cloning."""
+    """Interface to FishAudio fish-speech 0.1.0 for text-to-speech with voice cloning."""
 
     def __init__(self, model_path: str, voice_path: str) -> None:
         self.model_path = model_path
         self.voice_path = voice_path
         self._loaded = False
-        self._pip_installed = False
-        self._fish_speech_dir: str | None = None
+        self._engine: Any = None
 
     @property
     def is_loaded(self) -> bool:
         return self._loaded
 
-    def _check_pip_installed(self) -> bool:
-        """Check if fish-speech is installed as a pip package."""
-        result = subprocess.run(
-            [sys.executable, "-c", "import fish_speech; print('ok')"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        return result.returncode == 0
+    # ------------------------------------------------------------------
+    # Checkpoint discovery
+    # ------------------------------------------------------------------
 
-    def _find_fish_speech_dir(self) -> str | None:
-        """Try to locate a fish-speech source directory (optional)."""
-        candidates = [
-            os.path.join(self.model_path, "fish-speech"),
-            "/root/avatar-data/models/fish-audio/fish-speech",
-            os.path.expanduser("~/fish-speech"),
-        ]
-        for path in candidates:
-            if not os.path.isdir(path):
-                continue
-            if os.path.isfile(os.path.join(path, "tools", "inference.py")):
-                return path
-            if os.path.isfile(os.path.join(path, "fish_speech", "inference.py")):
-                return path
-        return None
+    def _find_llama_checkpoint(self) -> str:
+        """Scan model_path for the LLAMA checkpoint (model.pth)."""
+        root = Path(self.model_path)
+        # Direct match
+        direct = root / "model.pth"
+        if direct.is_file():
+            return str(direct)
+
+        # Search in subdirectories (e.g. fish-speech-1.5/model.pth)
+        for pth in sorted(root.rglob("model.pth")):
+            return str(pth)
+
+        # Fallback: any .pth in a directory containing "fish-speech"
+        for pth in sorted(root.rglob("*.pth")):
+            if "fish-speech" in str(pth):
+                return str(pth)
+
+        raise FileNotFoundError(
+            f"No LLAMA checkpoint (model.pth) found under {self.model_path}. "
+            "Download with: huggingface-cli download fishaudio/fish-speech-1.5 "
+            f"--local-dir {self.model_path}/fish-speech-1.5"
+        )
+
+    def _find_dac_checkpoint(self) -> str:
+        """Scan model_path for the DAC decoder checkpoint."""
+        root = Path(self.model_path)
+
+        # Look for files with dac/decoder/firefly in name
+        for pth in sorted(root.rglob("*.pth")):
+            name_lower = pth.name.lower()
+            if any(k in name_lower for k in ("dac", "decoder", "firefly")):
+                return str(pth)
+
+        # Look inside a "dac" or "decoder" subdirectory
+        for subdir_name in ("dac", "decoder", "firefly-gan-vq"):
+            for pth in sorted(root.rglob(f"{subdir_name}/*.pth")):
+                return str(pth)
+
+        raise FileNotFoundError(
+            f"No DAC decoder checkpoint found under {self.model_path}. "
+            "Download with: huggingface-cli download fishaudio/fish-speech-1.5 "
+            f"--local-dir {self.model_path}/fish-speech-1.5"
+        )
+
+    # ------------------------------------------------------------------
+    # Voice reference
+    # ------------------------------------------------------------------
 
     def _find_voice_reference(self) -> str:
         """Find the voice reference audio file for cloning."""
@@ -92,27 +117,63 @@ class TTSEngine:
         logger.info("Audio converted to WAV: %s", wav_path)
         return wav_path
 
+    # ------------------------------------------------------------------
+    # Model loading
+    # ------------------------------------------------------------------
+
     async def load_model(self) -> None:
-        """Verify fish-speech is installed and models are available."""
-        logger.info("Verifying FishAudio fish-speech installation...")
+        """Load fish-speech 0.1.0 models and create the TTSInferenceEngine."""
+        logger.info("Loading fish-speech 0.1.0 models from %s ...", self.model_path)
 
-        # Check pip-installed package first
-        self._pip_installed = self._check_pip_installed()
-        if self._pip_installed:
-            logger.info("fish-speech found as pip package")
-        else:
-            logger.warning("fish-speech not importable via pip")
-
-        # Also check for a source directory (fallback for older versions)
-        self._fish_speech_dir = self._find_fish_speech_dir()
-        if self._fish_speech_dir:
-            logger.info("Found fish-speech directory at: %s", self._fish_speech_dir)
-
-        if not self._pip_installed and not self._fish_speech_dir:
-            logger.warning(
-                "fish-speech not found (neither pip package nor source directory). "
-                "Install with: pip install fish-speech"
+        try:
+            import torch
+            from fish_speech.inference_engine import TTSInferenceEngine
+            from fish_speech.models.dac.inference import load_model as load_dac_model
+            from fish_speech.models.text2semantic.inference import (
+                launch_thread_safe_queue,
             )
+        except ImportError as e:
+            raise RuntimeError(
+                f"fish-speech 0.1.0 is not installed or incomplete: {e}. "
+                "Install with: pip install fish-speech"
+            ) from e
+
+        # Find checkpoints
+        llama_ckpt = self._find_llama_checkpoint()
+        dac_ckpt = self._find_dac_checkpoint()
+        logger.info("LLAMA checkpoint: %s", llama_ckpt)
+        logger.info("DAC checkpoint:   %s", dac_ckpt)
+
+        # Load models in a thread to avoid blocking the event loop
+        def _load() -> TTSInferenceEngine:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            dtype = torch.bfloat16 if device == "cuda" else torch.float32
+
+            logger.info("Loading LLAMA model on %s (%s)...", device, dtype)
+            llama_queue = launch_thread_safe_queue(
+                checkpoint_path=llama_ckpt,
+                device=device,
+                precision=dtype,
+            )
+
+            logger.info("Loading DAC decoder (modded_dac_vq) on %s...", device)
+            decoder = load_dac_model(
+                config_name="modded_dac_vq",
+                checkpoint_path=dac_ckpt,
+                device=device,
+            )
+
+            logger.info("Creating TTSInferenceEngine...")
+            engine = TTSInferenceEngine(
+                llama_queue=llama_queue,
+                decoder_model=decoder,
+                precision=dtype,
+                compile=False,
+            )
+            return engine
+
+        loop = asyncio.get_event_loop()
+        self._engine = await loop.run_in_executor(None, _load)
 
         # Verify voice reference exists
         try:
@@ -121,9 +182,12 @@ class TTSEngine:
         except FileNotFoundError as e:
             logger.warning("Voice reference not ready: %s", e)
 
-        # Mark as loaded so the worker can start
         self._loaded = True
-        logger.info("TTS engine ready (pip=%s, dir=%s)", self._pip_installed, self._fish_speech_dir)
+        logger.info("TTS engine ready (fish-speech 0.1.0)")
+
+    # ------------------------------------------------------------------
+    # Speech generation
+    # ------------------------------------------------------------------
 
     async def generate_speech(
         self,
@@ -136,7 +200,6 @@ class TTSEngine:
             await self.load_model()
 
         voice_ref = self._find_voice_reference()
-        # Convert to WAV if needed (webm, mp3, etc. → wav 16kHz mono)
         voice_ref = await self._ensure_wav_format(voice_ref)
 
         logger.info(
@@ -149,96 +212,50 @@ class TTSEngine:
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Map language codes
-        lang_map = {
-            "fr": "fr", "en": "en", "de": "de", "es": "es",
-            "ja": "ja", "ko": "ko", "ar": "ar", "zh": "zh",
-            "ru": "ru", "nl": "nl", "it": "it", "pl": "pl", "pt": "pt",
-        }
-        fish_lang = lang_map.get(language, language)
+        from fish_speech.utils.schema import ServeReferenceAudio, ServeTTSRequest
 
-        # Strategy 1: pip-installed module (preferred)
-        if self._pip_installed:
-            cmd = [
-                sys.executable, "-m", "fish_speech.inference",
-                "--text", text,
-                "--reference-audio", voice_ref,
-                "--output", output_path,
-                "--language", fish_lang,
-            ]
-            logger.info("Running fish-speech via pip module: %s", " ".join(cmd[:6]) + "...")
+        # Read voice reference bytes
+        with open(voice_ref, "rb") as f:
+            voice_bytes = f.read()
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-
-            if proc.returncode == 0 and os.path.isfile(output_path):
-                logger.info("TTS completed (pip module): %s", output_path)
-                return output_path
-
-            error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
-            logger.warning("pip module inference failed (rc=%d): %s", proc.returncode, error_msg)
-
-            # Try alternative argument names
-            cmd_alt = [
-                sys.executable, "-m", "fish_speech.inference",
-                "--text", text,
-                "--reference-audio", voice_ref,
-                "--output-path", output_path,
-                "--language", fish_lang,
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd_alt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-
-            if proc.returncode == 0 and os.path.isfile(output_path):
-                logger.info("TTS completed (pip module alt args): %s", output_path)
-                return output_path
-
-            error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
-            logger.warning("pip module alt args failed (rc=%d): %s", proc.returncode, error_msg)
-
-        # Strategy 2: source directory with tools/inference.py (older versions)
-        if self._fish_speech_dir:
-            tools_script = os.path.join(self._fish_speech_dir, "tools", "inference.py")
-            if os.path.isfile(tools_script):
-                cmd = [
-                    sys.executable, tools_script,
-                    "--text", text,
-                    "--reference-audio", voice_ref,
-                    "--output-path", output_path,
-                ]
-                logger.info("Running fish-speech via tools/inference.py...")
-
-                proc = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=self._fish_speech_dir,
-                )
-                stdout, stderr = await proc.communicate()
-
-                if proc.returncode == 0 and os.path.isfile(output_path):
-                    logger.info("TTS completed (tools/inference.py): %s", output_path)
-                    return output_path
-
-                error_msg = stderr.decode()[-500:] if stderr else "Unknown error"
-                logger.warning("tools/inference.py failed: %s", error_msg)
-
-        # Nothing worked
-        if not self._pip_installed and not self._fish_speech_dir:
-            raise RuntimeError(
-                "fish-speech n'est pas installé. "
-                "Installez-le sur la VM avec : pip install fish-speech"
-            )
-
-        raise RuntimeError(
-            "fish-speech TTS a échoué avec toutes les méthodes. "
-            "Vérifiez les logs du worker pour plus de détails."
+        request = ServeTTSRequest(
+            text=text,
+            references=[
+                ServeReferenceAudio(audio=voice_bytes, text=""),
+            ],
+            format="wav",
+            streaming=False,
         )
+
+        engine = self._engine
+
+        # Run inference in a thread (it's blocking / CPU+GPU bound)
+        def _infer() -> str:
+            import soundfile as sf
+
+            for result in engine.inference(request):
+                if result.code == "final":
+                    sample_rate, audio_np = result.audio
+                    sf.write(output_path, audio_np, sample_rate)
+                    logger.info(
+                        "TTS completed: %s (sr=%d, samples=%d)",
+                        output_path,
+                        sample_rate,
+                        len(audio_np),
+                    )
+                    return output_path
+                elif result.code == "error":
+                    raise RuntimeError(f"fish-speech inference error: {result.error}")
+
+            raise RuntimeError(
+                "fish-speech inference returned no final result. "
+                "Check model checkpoints and voice reference."
+            )
+
+        loop = asyncio.get_event_loop()
+        result_path = await loop.run_in_executor(None, _infer)
+
+        if not os.path.isfile(result_path):
+            raise RuntimeError(f"TTS output file not found: {result_path}")
+
+        return result_path
