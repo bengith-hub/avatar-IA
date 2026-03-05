@@ -53,12 +53,44 @@ class TTSEngine:
         """Find the voice reference audio file for cloning."""
         os.makedirs(self.voice_path, exist_ok=True)
         for filename in os.listdir(self.voice_path):
-            if filename.lower().endswith((".wav", ".mp3", ".flac", ".ogg")):
+            if filename.lower().endswith((".wav", ".mp3", ".flac", ".ogg", ".webm")):
                 return os.path.join(self.voice_path, filename)
         raise FileNotFoundError(
             f"No voice reference audio found in {self.voice_path}. "
             "Add a .wav file (10-30s of Benjamin's voice) to this directory."
         )
+
+    async def _ensure_wav_format(self, audio_path: str) -> str:
+        """Convert audio to WAV 16kHz mono if not already WAV (fish-speech compatibility)."""
+        if audio_path.lower().endswith(".wav"):
+            return audio_path
+
+        wav_path = os.path.splitext(audio_path)[0] + "_converted.wav"
+        if os.path.isfile(wav_path):
+            logger.info("Using cached converted WAV: %s", wav_path)
+            return wav_path
+
+        logger.info("Converting %s to WAV 16kHz mono...", os.path.basename(audio_path))
+        cmd = [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+            wav_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+
+        if proc.returncode != 0 or not os.path.isfile(wav_path):
+            error_msg = stderr.decode()[-300:] if stderr else "Unknown error"
+            raise RuntimeError(
+                f"Conversion audio échouée ({os.path.basename(audio_path)} → WAV): {error_msg}"
+            )
+
+        logger.info("Audio converted to WAV: %s", wav_path)
+        return wav_path
 
     async def load_model(self) -> None:
         """Verify fish-speech is installed and models are available."""
@@ -104,6 +136,8 @@ class TTSEngine:
             await self.load_model()
 
         voice_ref = self._find_voice_reference()
+        # Convert to WAV if needed (webm, mp3, etc. → wav 16kHz mono)
+        voice_ref = await self._ensure_wav_format(voice_ref)
 
         logger.info(
             "Generating speech: lang=%s, text_len=%d, voice_ref=%s, output=%s",
