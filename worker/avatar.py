@@ -1,82 +1,107 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import csv
 import logging
 import os
-import subprocess
+import shutil
 import sys
+import tempfile
 
 logger = logging.getLogger(__name__)
 
+# Emotion → prompt mapping for HunyuanVideo-Avatar
+EMOTION_PROMPTS: dict[str, str] = {
+    "neutral": "A person speaking naturally with a calm expression.",
+    "happy": "A person speaking happily with a warm smile.",
+    "sad": "A person speaking with a somber, sad expression.",
+    "angry": "A person speaking with an intense, angry expression.",
+    "surprised": "A person speaking with a surprised, wide-eyed expression.",
+    "serious": "A person speaking seriously with a focused expression.",
+}
+
 
 class AvatarEngine:
-    """Interface to HunyuanVideo-Avatar for photo + audio -> video generation."""
+    """Interface to HunyuanVideo-Avatar for photo + audio -> video generation.
 
-    def __init__(self, model_path: str) -> None:
+    Uses hymm_sp/sample_gpu_poor.py with CSV input, optimized for RTX 3090
+    (24GB VRAM) with CPU offloading and FP8 precision.
+    """
+
+    def __init__(self, model_path: str, install_path: str = "/root/HunyuanVideo-Avatar") -> None:
         self.model_path = model_path
+        self.install_path = install_path
         self._loaded = False
-        self._hunyuan_dir: str | None = None
+        self._checkpoint: str | None = None
 
     @property
     def is_loaded(self) -> bool:
         return self._loaded
 
-    def _find_hunyuan(self) -> str:
-        """Locate the HunyuanVideo-Avatar installation directory."""
-        candidates = [
-            os.path.join(self.model_path, "HunyuanVideo-Avatar"),
-            "/root/avatar-data/models/hunyuan/HunyuanVideo-Avatar",
-            os.path.expanduser("~/HunyuanVideo-Avatar"),
-        ]
-        for path in candidates:
-            if os.path.isdir(path):
-                # Check for key files that indicate a valid installation
-                if os.path.isfile(os.path.join(path, "infer.py")) or os.path.isfile(
-                    os.path.join(path, "scripts", "infer.sh")
-                ):
-                    return path
-                # Check for sample_audio2video.py (common entry point)
-                if os.path.isfile(
-                    os.path.join(path, "sample_audio2video.py")
-                ):
-                    return path
+    def _find_checkpoint(self) -> str:
+        """Locate the transformer checkpoint (FP8 preferred)."""
+        base = os.path.join(self.install_path, "weights", "ckpts", "hunyuan-video-t2v-720p", "transformers")
+
+        # Prefer FP8 checkpoint (lower VRAM)
+        fp8 = os.path.join(base, "mp_rank_00_model_states_fp8.pt")
+        if os.path.isfile(fp8):
+            return fp8
+
+        # Fallback to full precision
+        full = os.path.join(base, "mp_rank_00_model_states.pt")
+        if os.path.isfile(full):
+            return full
+
         raise FileNotFoundError(
-            f"HunyuanVideo-Avatar installation not found in: {candidates}"
+            f"HunyuanVideo-Avatar checkpoint not found in {base}. "
+            "Download with: python3.10 -c \"from huggingface_hub import snapshot_download; "
+            "snapshot_download('tencent/HunyuanVideo-Avatar', "
+            f"local_dir='{self.install_path}/weights/')\""
         )
+
+    def _verify_dependencies(self) -> None:
+        """Check that required model dependencies exist."""
+        weights_dir = os.path.join(self.install_path, "weights", "ckpts")
+
+        required = ["whisper-tiny", "det_align"]
+        for dep in required:
+            dep_path = os.path.join(weights_dir, dep)
+            if not os.path.isdir(dep_path):
+                logger.warning("Missing dependency: %s (expected at %s)", dep, dep_path)
+
+        # Check VAE
+        vae_path = os.path.join(weights_dir, "hunyuan-video-t2v-720p", "vae", "pytorch_model.pt")
+        if not os.path.isfile(vae_path):
+            logger.warning("VAE model not found at %s", vae_path)
 
     async def load_model(self) -> None:
         """Verify HunyuanVideo-Avatar is installed and ready."""
-        logger.info("Verifying HunyuanVideo-Avatar installation...")
+        logger.info("Verifying HunyuanVideo-Avatar at %s ...", self.install_path)
+
+        if not os.path.isdir(self.install_path):
+            logger.warning(
+                "HunyuanVideo-Avatar not found at %s. "
+                "Clone with: git clone https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar.git %s",
+                self.install_path,
+                self.install_path,
+            )
+            self._loaded = True  # Allow worker to start
+            return
+
+        # Check for inference script
+        script = os.path.join(self.install_path, "hymm_sp", "sample_gpu_poor.py")
+        if not os.path.isfile(script):
+            logger.warning("Inference script not found: %s", script)
 
         try:
-            self._hunyuan_dir = self._find_hunyuan()
-            logger.info("Found HunyuanVideo-Avatar at: %s", self._hunyuan_dir)
-
-            # Check for model weights
-            weights_indicators = [
-                "ckpts",
-                "checkpoints",
-                "weights",
-                "pretrained_models",
-            ]
-            has_weights = any(
-                os.path.isdir(os.path.join(self._hunyuan_dir, d))
-                for d in weights_indicators
-            )
-            if has_weights:
-                logger.info("Model weights directory found")
-            else:
-                logger.warning(
-                    "Model weights not found. Run setup.sh to download them."
-                )
-
-            self._loaded = True
-            logger.info("HunyuanVideo-Avatar ready")
-
+            self._checkpoint = self._find_checkpoint()
+            logger.info("Checkpoint: %s", self._checkpoint)
         except FileNotFoundError as e:
-            logger.warning("HunyuanVideo-Avatar setup incomplete: %s", e)
-            self._loaded = True  # Allow worker to start
+            logger.warning("Checkpoint not ready: %s", e)
+
+        self._verify_dependencies()
+        self._loaded = True
+        logger.info("HunyuanVideo-Avatar ready")
 
     async def generate_video(
         self,
@@ -87,15 +112,14 @@ class AvatarEngine:
     ) -> str:
         """Generate avatar video from reference photo and audio.
 
-        Uses HunyuanVideo-Avatar inference script. The model generates a
-        talking-head/body video synchronized with the audio, using the
-        reference photo as appearance guidance.
+        Creates a temporary CSV, runs hymm_sp/sample_gpu_poor.py, and
+        retrieves the generated MP4 from the results directory.
         """
         if not self.is_loaded:
             await self.load_model()
 
-        if self._hunyuan_dir is None:
-            self._hunyuan_dir = self._find_hunyuan()
+        if self._checkpoint is None:
+            self._checkpoint = self._find_checkpoint()
 
         logger.info(
             "Generating avatar video: photo=%s, audio=%s, emotion=%s, output=%s",
@@ -107,55 +131,60 @@ class AvatarEngine:
 
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Determine which inference script exists
-        infer_script = None
-        for candidate in [
-            "sample_audio2video.py",
-            "infer.py",
-            "inference.py",
-            os.path.join("scripts", "infer.py"),
-        ]:
-            full_path = os.path.join(self._hunyuan_dir, candidate)
-            if os.path.isfile(full_path):
-                infer_script = candidate
-                break
+        # Create a unique results directory for this job
+        job_results_dir = tempfile.mkdtemp(prefix="hunyuan_", dir=os.path.dirname(output_path))
 
-        if infer_script is None:
-            raise RuntimeError(
-                f"No inference script found in {self._hunyuan_dir}. "
-                "Ensure HunyuanVideo-Avatar is properly installed."
-            )
+        # Build prompt from emotion
+        prompt = EMOTION_PROMPTS.get(emotion, EMOTION_PROMPTS["neutral"])
+
+        # Create temporary CSV input file
+        csv_path = os.path.join(job_results_dir, "input.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["videoid", "image", "audio", "prompt", "fps"])
+            writer.writerow([1, photo_path, audio_path, prompt, 25])
+
+        logger.info("Created input CSV: %s", csv_path)
+
+        # Determine if FP8 checkpoint
+        use_fp8 = "fp8" in os.path.basename(self._checkpoint).lower()
 
         # Build inference command
-        # HunyuanVideo-Avatar typically uses sample_audio2video.py
         cmd = [
             sys.executable,
-            infer_script,
-            "--image-path", photo_path,
-            "--audio-path", audio_path,
-            "--output-path", output_path,
+            "hymm_sp/sample_gpu_poor.py",
+            "--input", csv_path,
+            "--ckpt", self._checkpoint,
+            "--sample-n-frames", "129",
+            "--seed", "128",
+            "--image-size", "704",
+            "--cfg-scale", "7.5",
+            "--infer-steps", "50",
+            "--use-deepcache", "1",
+            "--flow-shift-eval-video", "5.0",
+            "--save-path", job_results_dir,
+            "--cpu-offload",
+            "--infer-min",
         ]
+        if use_fp8:
+            cmd.append("--use-fp8")
 
-        # Enable TeaCache for RTX 3090 (24GB) to reduce VRAM usage
-        cmd.extend(["--use-teacache"])
+        env = {
+            **os.environ,
+            "MODEL_BASE": os.path.join(self.install_path, "weights"),
+            "CPU_OFFLOAD": "1",
+            "PYTHONPATH": ".",
+            "CUDA_VISIBLE_DEVICES": "0",
+        }
 
-        # Set resolution suitable for the GPU
-        cmd.extend(["--height", "576", "--width", "576"])
-
-        logger.info(
-            "Running HunyuanVideo-Avatar inference: %s",
-            " ".join(cmd[:6]) + "...",
-        )
+        logger.info("Running HunyuanVideo-Avatar: %s", " ".join(cmd[:8]) + " ...")
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=self._hunyuan_dir,
-            env={
-                **os.environ,
-                "CUDA_VISIBLE_DEVICES": "0",
-            },
+            cwd=self.install_path,
+            env=env,
         )
         stdout, stderr = await proc.communicate()
 
@@ -163,65 +192,50 @@ class AvatarEngine:
         stderr_text = stderr.decode() if stderr else ""
 
         if proc.returncode != 0:
-            error_msg = stderr_text[-800:] if stderr_text else "Unknown error"
-            logger.error("HunyuanVideo-Avatar stderr: %s", error_msg)
+            error_msg = stderr_text[-1000:] if stderr_text else "Unknown error"
+            logger.error("HunyuanVideo-Avatar failed (exit %d): %s", proc.returncode, error_msg)
+            raise RuntimeError(f"HunyuanVideo-Avatar inference failed: {error_msg}")
 
-            # Try with shell script if Python script failed
-            shell_script = os.path.join(self._hunyuan_dir, "scripts", "infer.sh")
-            if os.path.isfile(shell_script):
-                logger.info("Trying shell script fallback: %s", shell_script)
-                proc = await asyncio.create_subprocess_exec(
-                    "bash",
-                    shell_script,
-                    "--image-path", photo_path,
-                    "--audio-path", audio_path,
-                    "--output-path", output_path,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    cwd=self._hunyuan_dir,
-                )
-                stdout, stderr = await proc.communicate()
-                if proc.returncode != 0:
-                    error_msg = stderr.decode()[-800:] if stderr else "Unknown"
-                    raise RuntimeError(
-                        f"HunyuanVideo-Avatar inference failed: {error_msg}"
-                    )
-            else:
-                raise RuntimeError(
-                    f"HunyuanVideo-Avatar inference failed: {error_msg}"
-                )
-
-        # Check output exists - sometimes the script writes to a different path
-        if not os.path.isfile(output_path):
-            # Look for output in common locations
-            output_dir = os.path.dirname(output_path)
-            possible_outputs = []
-            for root, dirs, files in os.walk(output_dir):
-                for f in files:
-                    if f.endswith(".mp4"):
-                        possible_outputs.append(os.path.join(root, f))
-
-            # Also check the hunyuan output directory
-            hunyuan_output = os.path.join(self._hunyuan_dir, "outputs")
-            if os.path.isdir(hunyuan_output):
-                for f in sorted(os.listdir(hunyuan_output), reverse=True):
-                    if f.endswith(".mp4"):
-                        possible_outputs.append(
-                            os.path.join(hunyuan_output, f)
-                        )
+        # Find the generated MP4 in results directory
+        found_mp4 = self._find_output_video(job_results_dir)
+        if found_mp4 is None:
+            # Also check default results directories
+            for fallback_dir in ["results-poor", "results-single"]:
+                fallback_path = os.path.join(self.install_path, fallback_dir)
+                if os.path.isdir(fallback_path):
+                    found_mp4 = self._find_output_video(fallback_path)
+                    if found_mp4:
                         break
 
-            if possible_outputs:
-                # Use the most recent output
-                found = max(possible_outputs, key=os.path.getmtime)
-                logger.info("Found output at alternative path: %s", found)
-                import shutil
-                shutil.move(found, output_path)
-            else:
-                raise RuntimeError(
-                    f"Avatar video not created at {output_path}. "
-                    "Check HunyuanVideo-Avatar installation and GPU memory."
-                )
+        if found_mp4 is None:
+            raise RuntimeError(
+                f"No MP4 output found in {job_results_dir}. "
+                "Check HunyuanVideo-Avatar logs and GPU memory."
+            )
 
+        # Move to the expected output path
+        shutil.move(found_mp4, output_path)
         logger.info("Avatar video generated: %s", output_path)
+
+        # Clean up temp directory
+        try:
+            shutil.rmtree(job_results_dir, ignore_errors=True)
+        except Exception:
+            pass
+
         return output_path
+
+    @staticmethod
+    def _find_output_video(search_dir: str) -> str | None:
+        """Find the most recent MP4 file in a directory tree."""
+        mp4_files: list[str] = []
+        for root, _, files in os.walk(search_dir):
+            for f in files:
+                if f.endswith(".mp4"):
+                    mp4_files.append(os.path.join(root, f))
+
+        if not mp4_files:
+            return None
+
+        # Return the most recently modified
+        return max(mp4_files, key=os.path.getmtime)

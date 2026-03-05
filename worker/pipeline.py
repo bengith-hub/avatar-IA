@@ -18,7 +18,10 @@ tts_engine = TTSEngine(
     model_path=settings.fish_model_path,
     voice_path=settings.voice_path,
 )
-avatar_engine = AvatarEngine(model_path=settings.hunyuan_model_path)
+avatar_engine = AvatarEngine(
+    model_path=settings.hunyuan_model_path,
+    install_path=settings.hunyuan_install_path,
+)
 
 
 def resolve_photo_path(avatar_id: str) -> str:

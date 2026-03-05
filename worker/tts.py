@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class TTSEngine:
-    """Interface to FishAudio fish-speech 0.1.0 for text-to-speech with voice cloning."""
+    """Interface to FishAudio OpenAudio S1-mini for text-to-speech with voice cloning."""
 
     def __init__(self, model_path: str, voice_path: str) -> None:
         self.model_path = model_path
@@ -26,52 +26,30 @@ class TTSEngine:
     # Checkpoint discovery
     # ------------------------------------------------------------------
 
-    def _find_llama_checkpoint(self) -> str:
-        """Scan model_path for the LLAMA checkpoint (model.pth)."""
+    def _find_model_dir(self) -> str:
+        """Find the openaudio-s1-mini model directory (contains model.pth + codec.pth)."""
         root = Path(self.model_path)
-        # Direct match
-        direct = root / "model.pth"
-        if direct.is_file():
-            return str(direct)
 
-        # Search in subdirectories (e.g. fish-speech-1.5/model.pth)
+        # Direct match: model_path itself contains the checkpoint files
+        if (root / "model.pth").is_file() and (root / "codec.pth").is_file():
+            return str(root)
+
+        # Search subdirectories (e.g. openaudio-s1-mini/)
+        for subdir in sorted(root.iterdir()):
+            if subdir.is_dir():
+                if (subdir / "model.pth").is_file() and (subdir / "codec.pth").is_file():
+                    return str(subdir)
+
+        # Recursive fallback
         for pth in sorted(root.rglob("model.pth")):
-            return str(pth)
-
-        # Fallback: any .pth in a directory containing "fish-speech"
-        for pth in sorted(root.rglob("*.pth")):
-            if "fish-speech" in str(pth):
-                return str(pth)
+            codec = pth.parent / "codec.pth"
+            if codec.is_file():
+                return str(pth.parent)
 
         raise FileNotFoundError(
-            f"No LLAMA checkpoint (model.pth) found under {self.model_path}. "
-            "Download with: huggingface-cli download fishaudio/fish-speech-1.5 "
-            f"--local-dir {self.model_path}/fish-speech-1.5"
-        )
-
-    def _find_dac_checkpoint(self) -> str:
-        """Scan model_path for the DAC decoder checkpoint."""
-        root = Path(self.model_path)
-
-        # Prefer codec.pth (modded_dac_vq compatible checkpoint)
-        for pth in sorted(root.rglob("codec.pth")):
-            return str(pth)
-
-        # Fallback: look for files with dac/decoder/firefly in name
-        for pth in sorted(root.rglob("*.pth")):
-            name_lower = pth.name.lower()
-            if any(k in name_lower for k in ("dac", "decoder", "firefly", "codec")):
-                return str(pth)
-
-        # Look inside a "dac" or "decoder" subdirectory
-        for subdir_name in ("dac", "decoder", "firefly-gan-vq"):
-            for pth in sorted(root.rglob(f"{subdir_name}/*.pth")):
-                return str(pth)
-
-        raise FileNotFoundError(
-            f"No DAC decoder checkpoint found under {self.model_path}. "
-            "Download with: huggingface-cli download fishaudio/fish-speech-1.5 "
-            f"--local-dir {self.model_path}/fish-speech-1.5"
+            f"No OpenAudio S1 model found under {self.model_path}. "
+            "Download with: huggingface-cli download fishaudio/openaudio-s1-mini "
+            f"--local-dir {self.model_path}/openaudio-s1-mini"
         )
 
     # ------------------------------------------------------------------
@@ -126,8 +104,8 @@ class TTSEngine:
     # ------------------------------------------------------------------
 
     async def load_model(self) -> None:
-        """Load fish-speech 0.1.0 models and create the TTSInferenceEngine."""
-        logger.info("Loading fish-speech 0.1.0 models from %s ...", self.model_path)
+        """Load OpenAudio S1-mini models and create the TTSInferenceEngine."""
+        logger.info("Loading OpenAudio S1-mini from %s ...", self.model_path)
 
         try:
             import torch
@@ -138,13 +116,15 @@ class TTSEngine:
             )
         except ImportError as e:
             raise RuntimeError(
-                f"fish-speech 0.1.0 is not installed or incomplete: {e}. "
-                "Install with: pip install fish-speech"
+                f"fish-speech is not installed or incomplete: {e}. "
+                "Install with: cd /root/fish-speech && pip install ."
             ) from e
 
-        # Find checkpoints
-        llama_ckpt = self._find_llama_checkpoint()
-        dac_ckpt = self._find_dac_checkpoint()
+        # Find the model directory (contains model.pth + codec.pth + config.json)
+        model_dir = self._find_model_dir()
+        llama_ckpt = os.path.join(model_dir, "model.pth")
+        dac_ckpt = os.path.join(model_dir, "codec.pth")
+        logger.info("Model directory: %s", model_dir)
         logger.info("LLAMA checkpoint: %s", llama_ckpt)
         logger.info("DAC checkpoint:   %s", dac_ckpt)
 
@@ -153,12 +133,9 @@ class TTSEngine:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-            # launch_thread_safe_queue expects the directory containing
-            # config.json + model.pth, not the .pth file itself
-            llama_dir = str(Path(llama_ckpt).parent)
-            logger.info("Loading LLAMA model from %s on %s (%s)...", llama_dir, device, dtype)
+            logger.info("Loading LLAMA model from %s on %s (%s)...", model_dir, device, dtype)
             llama_queue = launch_thread_safe_queue(
-                checkpoint_path=llama_dir,
+                checkpoint_path=model_dir,
                 device=device,
                 precision=dtype,
             )
@@ -190,7 +167,7 @@ class TTSEngine:
             logger.warning("Voice reference not ready: %s", e)
 
         self._loaded = True
-        logger.info("TTS engine ready (fish-speech 0.1.0)")
+        logger.info("TTS engine ready (OpenAudio S1-mini)")
 
     # ------------------------------------------------------------------
     # Speech generation
