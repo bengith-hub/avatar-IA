@@ -58,3 +58,8 @@ class AvatarInfo(BaseModel):
     name: str
     path: str
     type: str = "photo"
+
+
+class AvatarUploadBase64(BaseModel):
+    filename: str
+    data_base64: str
