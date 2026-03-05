@@ -90,12 +90,12 @@ async function fetchR2VoiceSampleBase64(): Promise<{
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session) {
-    return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  }
-
   try {
+    const session = await auth();
+    if (!session) {
+      return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+    }
+
     const body = await req.json();
 
     // If avatar is stored on R2, embed the photo in the generate request
@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error("[gpu/generate] Error:", message, stack);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
