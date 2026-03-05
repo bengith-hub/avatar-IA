@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     worker_token: str = ""
     hunyuan_model_path: str = "/root/avatar-data/models/hunyuan"
+    hunyuan_install_path: str = "/root/HunyuanVideo-Avatar"
     fish_model_path: str = "/root/avatar-data/models/fish-audio"
     photos_path: str = "/root/avatar-data/photos"
     voice_path: str = "/root/avatar-data/voice"
