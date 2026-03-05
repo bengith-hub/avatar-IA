@@ -40,7 +40,14 @@ export async function POST(req: NextRequest) {
           body.voice_sample_base64 = r2Voice.base64;
           body.voice_sample_filename = r2Voice.filename;
         } else {
-          console.warn("[gpu/generate] WARNING: No voice sample found anywhere!");
+          console.error("[gpu/generate] No voice sample found anywhere (worker, R2)");
+          return NextResponse.json(
+            {
+              error:
+                "Aucun échantillon vocal trouvé. Veuillez uploader votre voix dans la page Avatars avant de générer.",
+            },
+            { status: 400 }
+          );
         }
       }
     }

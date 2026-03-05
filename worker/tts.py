@@ -51,11 +51,7 @@ class TTSEngine:
 
     def _find_voice_reference(self) -> str:
         """Find the voice reference audio file for cloning."""
-        if not os.path.isdir(self.voice_path):
-            raise FileNotFoundError(
-                f"Voice directory not found: {self.voice_path}. "
-                "Create it and add a .wav file (10-30s of Benjamin's voice)."
-            )
+        os.makedirs(self.voice_path, exist_ok=True)
         for filename in os.listdir(self.voice_path):
             if filename.lower().endswith((".wav", ".mp3", ".flac", ".ogg")):
                 return os.path.join(self.voice_path, filename)
