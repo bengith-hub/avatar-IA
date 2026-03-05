@@ -16,8 +16,8 @@ function workerHeaders(): HeadersInit {
 function isOfflineError(status: number, body: string): boolean {
   return (
     body.includes("ERR_NGROK") ||
-    body.includes("is offline") ||
-    body.includes("tunnel") ||
+    body.includes("ngrok") ||
+    body.includes("Tunnel") ||
     body.includes("<!DOCTYPE") ||
     body.includes("<html")
   );

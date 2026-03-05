@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       message.includes("UND_ERR") ||
       message.includes("is not set") ||
       message.includes("VM GPU") ||
-      message.includes("tunnel") ||
+      message.includes("ngrok") ||
       message.includes("Impossible de joindre") ||
       message.includes("failed (404)") ||
       message.includes("failed (502)") ||

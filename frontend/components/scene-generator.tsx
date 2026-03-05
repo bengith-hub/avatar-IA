@@ -53,13 +53,36 @@ interface JobStatus {
   error: string | null;
 }
 
+const FORM_STORAGE_KEY = "scene-generator-form";
+
+interface FormState {
+  text: string;
+  language: string;
+  avatarId: string;
+  backgroundUrl: string;
+  emotion: string;
+  format: string;
+  script: string;
+}
+
+const loadFormState = (): Partial<FormState> => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(FORM_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
 const SceneGenerator = () => {
-  const [text, setText] = useState("");
-  const [language, setLanguage] = useState("fr");
-  const [avatarId, setAvatarId] = useState("");
-  const [backgroundUrl, setBackgroundUrl] = useState("");
-  const [emotion, setEmotion] = useState("neutral");
-  const [format, setFormat] = useState("16:9");
+  const saved = loadFormState();
+  const [text, setText] = useState(saved.text ?? "");
+  const [language, setLanguage] = useState(saved.language ?? "fr");
+  const [avatarId, setAvatarId] = useState(saved.avatarId ?? "");
+  const [backgroundUrl, setBackgroundUrl] = useState(saved.backgroundUrl ?? "");
+  const [emotion, setEmotion] = useState(saved.emotion ?? "neutral");
+  const [format, setFormat] = useState(saved.format ?? "16:9");
 
   const [avatars, setAvatars] = useState<{ id: string; name: string; url?: string }[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -69,9 +92,9 @@ const SceneGenerator = () => {
 
   // Persist active job in localStorage so it survives navigation
   useEffect(() => {
-    const saved = localStorage.getItem("activeJobId");
-    if (saved) {
-      setJobId(saved);
+    const savedJob = localStorage.getItem("activeJobId");
+    if (savedJob) {
+      setJobId(savedJob);
       setGenerating(true);
     }
   }, []);
@@ -211,8 +234,14 @@ const SceneGenerator = () => {
   const isCompleted = jobStatus?.status === "completed";
   const progress = jobStatus?.progress ?? 0;
 
-  const [script, setScript] = useState("");
+  const [script, setScript] = useState(saved.script ?? "");
   const [showAssistant, setShowAssistant] = useState(false);
+
+  // Persist form state to localStorage on change
+  useEffect(() => {
+    const state: FormState = { text, language, avatarId, backgroundUrl, emotion, format, script };
+    localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(state));
+  }, [text, language, avatarId, backgroundUrl, emotion, format, script]);
 
   const handleExtractSpoken = () => {
     const spoken = extractSpokenText(script);
