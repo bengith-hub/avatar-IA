@@ -80,6 +80,20 @@ async def health():
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest):
+    # If avatar photo is embedded as base64, save it to disk first
+    if request.avatar_photo_base64 and request.avatar_photo_filename:
+        import base64
+
+        photos_dir = settings.photos_path
+        os.makedirs(photos_dir, exist_ok=True)
+        file_path = os.path.join(photos_dir, request.avatar_photo_filename)
+        content = base64.b64decode(request.avatar_photo_base64)
+        with open(file_path, "wb") as f:
+            f.write(content)
+        # Update avatar_id to match the saved filename (without extension)
+        request.avatar_id = os.path.splitext(request.avatar_photo_filename)[0]
+        logger.info("Saved embedded avatar photo: %s", file_path)
+
     job_id = job_manager.create_job(request)
     asyncio.create_task(run_pipeline(job_id))
     return GenerateResponse(job_id=job_id)
