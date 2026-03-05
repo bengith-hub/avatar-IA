@@ -52,7 +52,14 @@ export async function GET() {
         });
         if (res.ok) {
           const data = await res.json();
-          return NextResponse.json(data);
+          // Rewrite worker-relative URLs to go through our proxy
+          const samples = Array.isArray(data)
+            ? data.map((s: Record<string, unknown>) => ({
+                ...s,
+                url: `/api/gpu/voice/stream?name=${encodeURIComponent(String(s.name ?? ""))}`,
+              }))
+            : data;
+          return NextResponse.json(samples);
         }
       } catch {
         // Worker unavailable
@@ -174,6 +181,27 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Nom du fichier requis" }, { status: 400 });
     }
 
+    // Try worker first
+    const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
+    if (workerUrl) {
+      try {
+        const res = await fetch(`${workerUrl}/voice-samples`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ name }),
+        });
+        if (res.ok) {
+          return NextResponse.json({ success: true });
+        }
+      } catch {
+        // Worker unavailable, fall through to R2
+      }
+    }
+
+    // Fallback: delete from R2
     const client = getR2Client();
     await client.send(
       new DeleteObjectCommand({

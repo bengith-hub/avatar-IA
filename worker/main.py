@@ -180,6 +180,86 @@ async def upload_avatar(file: UploadFile = File(...)):
     )
 
 
+# --- Voice samples ---
+
+
+@app.get("/voice-samples")
+async def list_voice_samples():
+    voice_dir = settings.voice_path
+    if not os.path.isdir(voice_dir):
+        return []
+
+    samples = []
+    for filename in sorted(os.listdir(voice_dir)):
+        if filename.lower().endswith((".wav", ".mp3", ".ogg", ".flac", ".webm")):
+            file_path = os.path.join(voice_dir, filename)
+            samples.append(
+                {
+                    "name": filename,
+                    "url": f"/voice-samples/{filename}",
+                    "size": os.path.getsize(file_path),
+                    "source": "worker",
+                }
+            )
+    return samples
+
+
+@app.post("/voice-samples")
+async def upload_voice_sample(file: UploadFile = File(...)):
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    voice_dir = settings.voice_path
+    os.makedirs(voice_dir, exist_ok=True)
+
+    file_path = os.path.join(voice_dir, file.filename)
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    logger.info("Voice sample uploaded: %s (%d bytes)", file.filename, len(content))
+    return {
+        "name": file.filename,
+        "url": f"/voice-samples/{file.filename}",
+        "size": len(content),
+        "source": "worker",
+    }
+
+
+@app.delete("/voice-samples")
+async def delete_voice_sample(request: Request):
+    body = await request.json()
+    name = body.get("name")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    voice_dir = settings.voice_path
+    file_path = os.path.join(voice_dir, name)
+
+    # Prevent path traversal
+    if not os.path.realpath(file_path).startswith(os.path.realpath(voice_dir)):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+        logger.info("Voice sample deleted: %s", name)
+
+    return {"success": True}
+
+
+@app.get("/voice-samples/{filename}")
+async def serve_voice_sample(filename: str):
+    voice_dir = settings.voice_path
+    file_path = os.path.join(voice_dir, filename)
+
+    if not os.path.realpath(file_path).startswith(os.path.realpath(voice_dir)):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Voice sample not found")
+
+    return FileResponse(file_path)
+
+
 @app.post("/avatars/upload-json", response_model=AvatarInfo)
 async def upload_avatar_json(body: AvatarUploadBase64):
     """Upload avatar as JSON with base64 data (avoids ngrok multipart issues)."""
