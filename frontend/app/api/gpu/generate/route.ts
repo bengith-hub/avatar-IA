@@ -39,15 +39,16 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
     console.error("[gpu/generate] Error:", message);
-    const isVmOffline =
-      message.includes("VM GPU") ||
-      message.includes("ngrok") ||
-      message.includes("Impossible de joindre") ||
+    const isConnError =
+      message.includes("Connexion refusée") ||
+      message.includes("tunnel") ||
+      message.includes("URL introuvable") ||
+      message.includes("Timeout") ||
       message.includes("fetch failed") ||
       message.includes("ECONNREFUSED");
     return NextResponse.json(
       { error: message },
-      { status: isVmOffline ? 503 : 500 }
+      { status: isConnError ? 503 : 500 }
     );
   }
 }
