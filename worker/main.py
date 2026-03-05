@@ -94,6 +94,18 @@ async def generate(request: GenerateRequest):
         request.avatar_id = os.path.splitext(request.avatar_photo_filename)[0]
         logger.info("Saved embedded avatar photo: %s", file_path)
 
+    # If voice sample is embedded as base64, save it to the voice directory
+    if request.voice_sample_base64 and request.voice_sample_filename:
+        import base64 as b64
+
+        voice_dir = settings.voice_path
+        os.makedirs(voice_dir, exist_ok=True)
+        voice_file_path = os.path.join(voice_dir, request.voice_sample_filename)
+        voice_content = b64.b64decode(request.voice_sample_base64)
+        with open(voice_file_path, "wb") as f:
+            f.write(voice_content)
+        logger.info("Saved embedded voice sample: %s", voice_file_path)
+
     job_id = job_manager.create_job(request)
     asyncio.create_task(run_pipeline(job_id))
     return GenerateResponse(job_id=job_id)
