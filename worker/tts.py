@@ -149,9 +149,12 @@ class TTSEngine:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
-            logger.info("Loading LLAMA model on %s (%s)...", device, dtype)
+            # launch_thread_safe_queue expects the directory containing
+            # config.json + model.pth, not the .pth file itself
+            llama_dir = str(Path(llama_ckpt).parent)
+            logger.info("Loading LLAMA model from %s on %s (%s)...", llama_dir, device, dtype)
             llama_queue = launch_thread_safe_queue(
-                checkpoint_path=llama_ckpt,
+                checkpoint_path=llama_dir,
                 device=device,
                 precision=dtype,
             )
