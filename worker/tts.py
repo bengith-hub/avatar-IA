@@ -159,9 +159,9 @@ class TTSEngine:
                 precision=dtype,
             )
 
-            logger.info("Loading DAC decoder (modded_dac_vq) on %s...", device)
+            logger.info("Loading DAC decoder (firefly_gan_vq) on %s...", device)
             decoder = load_dac_model(
-                config_name="modded_dac_vq",
+                config_name="firefly_gan_vq",
                 checkpoint_path=dac_ckpt,
                 device=device,
             )
