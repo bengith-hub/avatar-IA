@@ -385,7 +385,16 @@ const SceneGenerator = () => {
 
       {/* Error */}
       {error && (
-        <p className="rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-400">{error}</p>
+        <div className="rounded-lg bg-red-500/10 px-4 py-2 text-sm text-red-400">
+          <p>{error}</p>
+          {(error.includes("échantillon vocal") || error.includes("voice") || error.includes("vocal")) && (
+            <p className="mt-1">
+              <a href="/avatars" className="underline hover:text-red-300">
+                → Aller dans Avatars pour uploader votre voix
+              </a>
+            </p>
+          )}
+        </div>
       )}
 
       {/* Progress bar */}
