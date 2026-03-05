@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { generateVideo } from "@/lib/gpu-api";
+import {
+  S3Client,
+  GetObjectCommand,
+  ListObjectsV2Command,
+} from "@aws-sdk/client-s3";
 
-function getR2Client() {
-  const { S3Client } = require("@aws-sdk/client-s3") as typeof import("@aws-sdk/client-s3");
-
+function getR2Client(): S3Client {
   const accountId = process.env.R2_ACCOUNT_ID;
   const accessKey = process.env.R2_ACCESS_KEY;
   const secretKey = process.env.R2_SECRET_KEY;
@@ -28,10 +31,6 @@ async function fetchR2AvatarBase64(avatarId: string): Promise<{
   base64: string;
   filename: string;
 }> {
-  const { GetObjectCommand, ListObjectsV2Command } = await import(
-    "@aws-sdk/client-s3"
-  );
-
   const client = getR2Client();
 
   const listRes = await client.send(
@@ -63,10 +62,6 @@ async function fetchR2VoiceSampleBase64(): Promise<{
   base64: string;
   filename: string;
 } | null> {
-  const { GetObjectCommand, ListObjectsV2Command } = await import(
-    "@aws-sdk/client-s3"
-  );
-
   try {
     const client = getR2Client();
 
