@@ -184,3 +184,33 @@ export async function listAvatars() {
     throw connectionError("avatars", err);
   }
 }
+
+/**
+ * Fetch a voice sample from the worker as base64.
+ * Returns null if no voice sample is available on the worker.
+ */
+export async function fetchWorkerVoiceSampleBase64(): Promise<{
+  base64: string;
+  filename: string;
+} | null> {
+  try {
+    const listRes = await fetch(`${workerUrl()}/voice-samples`, {
+      headers: workerHeaders(),
+    });
+    const samples = (await safeResponseJson(listRes, "voice-samples")) as {
+      name: string;
+    }[];
+    if (!Array.isArray(samples) || samples.length === 0) return null;
+
+    const filename = samples[0].name;
+    const fileRes = await fetch(`${workerUrl()}/voice-samples/${encodeURIComponent(filename)}`, {
+      headers: workerHeaders(),
+    });
+    if (!fileRes.ok) return null;
+
+    const buf = Buffer.from(await fileRes.arrayBuffer());
+    return { base64: buf.toString("base64"), filename };
+  } catch {
+    return null;
+  }
+}

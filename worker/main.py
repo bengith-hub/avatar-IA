@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Avatar IA Worker", version="0.1.0")
 start_time = time.time()
 
+# Ensure required directories exist at startup
+for _dir in [settings.voice_path, settings.photos_path, settings.output_path]:
+    os.makedirs(_dir, exist_ok=True)
+
 
 # --- Auth middleware ---
 
