@@ -14,6 +14,7 @@ from models import (
     GenerateResponse,
     HealthResponse,
     AvatarInfo,
+    AvatarUploadBase64,
 )
 from jobs import job_manager
 from pipeline import run_pipeline, tts_engine, avatar_engine
@@ -146,6 +147,27 @@ async def upload_avatar(file: UploadFile = File(...)):
         f.write(content)
 
     name = os.path.splitext(file.filename)[0]
+    return AvatarInfo(
+        id=name,
+        name=name.replace("_", " ").replace("-", " ").title(),
+        path=file_path,
+    )
+
+
+@app.post("/avatars/upload-json", response_model=AvatarInfo)
+async def upload_avatar_json(body: AvatarUploadBase64):
+    """Upload avatar as JSON with base64 data (avoids ngrok multipart issues)."""
+    import base64
+
+    photos_dir = settings.photos_path
+    os.makedirs(photos_dir, exist_ok=True)
+
+    file_path = os.path.join(photos_dir, body.filename)
+    content = base64.b64decode(body.data_base64)
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    name = os.path.splitext(body.filename)[0]
     return AvatarInfo(
         id=name,
         name=name.replace("_", " ").replace("-", " ").title(),

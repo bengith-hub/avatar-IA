@@ -44,17 +44,17 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
   const filename = `${avatarId}.${ext}`;
 
   const workerUrl = process.env.GPU_WORKER_URL!.replace(/\/$/, "");
-  const form = new FormData();
-  form.append("file", new Blob([Buffer.from(bytes)]), filename);
+  const base64Data = Buffer.from(bytes).toString("base64");
 
-  const uploadRes = await fetch(`${workerUrl}/avatars`, {
+  const uploadRes = await fetch(`${workerUrl}/avatars/upload-json`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
+      "Content-Type": "application/json",
       "ngrok-skip-browser-warning": "true",
       "User-Agent": "AvatarIA-Worker/1.0",
     },
-    body: form,
+    body: JSON.stringify({ filename, data_base64: base64Data }),
   });
 
   const uploadBody = await uploadRes.text();
