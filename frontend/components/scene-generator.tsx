@@ -67,6 +67,15 @@ const SceneGenerator = () => {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState("");
 
+  // Persist active job in localStorage so it survives navigation
+  useEffect(() => {
+    const saved = localStorage.getItem("activeJobId");
+    if (saved) {
+      setJobId(saved);
+      setGenerating(true);
+    }
+  }, []);
+
   useEffect(() => {
     const loadAvatars = async () => {
       try {
@@ -97,49 +106,64 @@ const SceneGenerator = () => {
   const [pollErrors, setPollErrors] = useState(0);
   const MAX_POLL_ERRORS = 12; // ~60s of retries before giving up
 
-  const pollStatus = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/gpu/status?job_id=${id}`);
-      if (!res.ok) {
-        // Don't stop polling on transient errors — retry
+  // Auto-poll whenever there is an active jobId and we're generating
+  useEffect(() => {
+    if (!jobId || !generating) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const res = await fetch(`/api/gpu/status?job_id=${jobId}`);
+        if (cancelled) return;
+
+        if (!res.ok) {
+          setPollErrors((prev) => {
+            const next = prev + 1;
+            if (next >= MAX_POLL_ERRORS) {
+              setError("Impossible de récupérer le statut du job. Vérifiez la VM.");
+              setGenerating(false);
+              localStorage.removeItem("activeJobId");
+            }
+            return next;
+          });
+          return;
+        }
+
+        setPollErrors(0);
+        const data: JobStatus = await res.json();
+        setJobStatus(data);
+
+        if (data.status === "completed" || data.status === "failed") {
+          setGenerating(false);
+          localStorage.removeItem("activeJobId");
+          if (data.status === "failed") {
+            setError(data.error ?? "La génération a échoué");
+          }
+        }
+      } catch {
+        if (cancelled) return;
         setPollErrors((prev) => {
           const next = prev + 1;
           if (next >= MAX_POLL_ERRORS) {
-            setError("Impossible de récupérer le statut du job. Vérifiez la VM.");
+            setError("Connexion perdue avec la VM GPU.");
             setGenerating(false);
+            localStorage.removeItem("activeJobId");
           }
           return next;
         });
-        setTimeout(() => pollStatus(id), 5000);
-        return;
       }
+    };
 
-      // Reset error counter on success
-      setPollErrors(0);
-      const data: JobStatus = await res.json();
-      setJobStatus(data);
-
-      if (data.status === "completed" || data.status === "failed") {
-        setGenerating(false);
-        if (data.status === "failed") {
-          setError(data.error ?? "La génération a échoué");
-        }
-        return;
-      }
-
-      setTimeout(() => pollStatus(id), 5000);
-    } catch {
-      setPollErrors((prev) => {
-        const next = prev + 1;
-        if (next >= MAX_POLL_ERRORS) {
-          setError("Connexion perdue avec la VM GPU.");
-          setGenerating(false);
-        }
-        return next;
-      });
-      setTimeout(() => pollStatus(id), 5000);
-    }
-  }, []);
+    // Poll immediately, then every 5 seconds
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [jobId, generating]);
 
   const handleGenerate = async () => {
     if (!text.trim() || !avatarId) return;
@@ -176,8 +200,8 @@ const SceneGenerator = () => {
       }
 
       const data = await res.json();
+      localStorage.setItem("activeJobId", data.job_id);
       setJobId(data.job_id);
-      pollStatus(data.job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur");
       setGenerating(false);
