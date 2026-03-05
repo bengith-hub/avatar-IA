@@ -52,6 +52,7 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
     headers: {
       Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
       "ngrok-skip-browser-warning": "true",
+      "User-Agent": "AvatarIA-Worker/1.0",
     },
     body: form,
   });
@@ -63,7 +64,7 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
     uploadBody.includes("<!DOCTYPE")
   ) {
     throw new Error(
-      "Impossible de joindre la VM GPU. Vérifiez que le tunnel est actif."
+      `Impossible de joindre la VM GPU (${uploadRes.status}). Vérifiez que le tunnel est actif.`
     );
   }
 
