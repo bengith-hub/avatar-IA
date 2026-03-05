@@ -65,33 +65,39 @@ interface FormState {
   script: string;
 }
 
-const loadFormState = (): Partial<FormState> => {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(FORM_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-};
-
 const SceneGenerator = () => {
-  const saved = loadFormState();
-  const [text, setText] = useState(saved.text ?? "");
-  const [language, setLanguage] = useState(saved.language ?? "fr");
-  const [avatarId, setAvatarId] = useState(saved.avatarId ?? "");
-  const [backgroundUrl, setBackgroundUrl] = useState(saved.backgroundUrl ?? "");
-  const [emotion, setEmotion] = useState(saved.emotion ?? "neutral");
-  const [format, setFormat] = useState(saved.format ?? "16:9");
+  const [text, setText] = useState("");
+  const [language, setLanguage] = useState("fr");
+  const [avatarId, setAvatarId] = useState("");
+  const [backgroundUrl, setBackgroundUrl] = useState("");
+  const [emotion, setEmotion] = useState("neutral");
+  const [format, setFormat] = useState("16:9");
 
   const [avatars, setAvatars] = useState<{ id: string; name: string; url?: string }[]>([]);
   const [generating, setGenerating] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState("");
+  const [script, setScript] = useState("");
+  const [showAssistant, setShowAssistant] = useState(false);
 
-  // Persist active job in localStorage so it survives navigation
+  // Restore form state + active job from localStorage after mount (avoids hydration mismatch)
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FORM_STORAGE_KEY);
+      if (raw) {
+        const saved: Partial<FormState> = JSON.parse(raw);
+        if (saved.text) setText(saved.text);
+        if (saved.language) setLanguage(saved.language);
+        if (saved.avatarId) setAvatarId(saved.avatarId);
+        if (saved.backgroundUrl) setBackgroundUrl(saved.backgroundUrl);
+        if (saved.emotion) setEmotion(saved.emotion);
+        if (saved.format) setFormat(saved.format);
+        if (saved.script) setScript(saved.script);
+      }
+    } catch {
+      // ignore
+    }
     const savedJob = localStorage.getItem("activeJobId");
     if (savedJob) {
       setJobId(savedJob);
@@ -233,9 +239,6 @@ const SceneGenerator = () => {
 
   const isCompleted = jobStatus?.status === "completed";
   const progress = jobStatus?.progress ?? 0;
-
-  const [script, setScript] = useState(saved.script ?? "");
-  const [showAssistant, setShowAssistant] = useState(false);
 
   // Persist form state to localStorage on change
   useEffect(() => {
