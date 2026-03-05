@@ -11,6 +11,7 @@ interface VmStatus {
     gpu_ram: number | null;
     cost_per_hour: number | null;
     start_date: string | null;
+    worker_url: string | null;
   };
   billing: {
     balance: number | null;
@@ -151,6 +152,16 @@ const GpuStatusCard = () => {
     }
   };
 
+  // Auto-test worker connection when VM becomes running
+  const prevRunning = useState(false);
+  useEffect(() => {
+    const running = status?.instance?.status === "running";
+    if (running && !prevRunning[0] && !workerStatus.tested && !workerStatus.loading) {
+      testWorkerConnection();
+    }
+    prevRunning[1](running);
+  }, [status?.instance?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const vmStatus = status?.instance?.status ?? "unknown";
   const isRunning = vmStatus === "running";
   const isStopped = vmStatus === "stopped" || vmStatus === "exited";
@@ -244,6 +255,14 @@ const GpuStatusCard = () => {
             <p className="text-zinc-500">Coût session</p>
             <p className="font-medium text-blue-400">
               ~${sessionCost.toFixed(3)}
+            </p>
+          </div>
+        )}
+        {isRunning && status?.instance?.worker_url && (
+          <div className="col-span-2">
+            <p className="text-zinc-500">Worker URL</p>
+            <p className="truncate font-mono text-xs font-medium text-zinc-300">
+              {status.instance.worker_url}
             </p>
           </div>
         )}

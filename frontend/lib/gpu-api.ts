@@ -1,7 +1,39 @@
-function workerUrl(): string {
-  const url = process.env.GPU_WORKER_URL;
-  if (!url) throw new Error("GPU_WORKER_URL is not set");
-  return url.replace(/\/$/, "");
+import { getWorkerUrlFromInstance } from "@/lib/vast-api";
+
+// Cache resolved worker URL for 60 seconds to avoid calling Vast.ai on every request
+let _cachedUrl: string | null = null;
+let _cachedAt = 0;
+const CACHE_TTL_MS = 60_000;
+
+export async function resolveWorkerUrl(): Promise<string> {
+  // 1. If GPU_WORKER_URL is set and is NOT an ngrok URL, use it directly
+  const envUrl = process.env.GPU_WORKER_URL;
+  if (envUrl && !envUrl.includes("ngrok")) {
+    return envUrl.replace(/\/$/, "");
+  }
+
+  // 2. Return cached URL if still fresh
+  if (_cachedUrl && Date.now() - _cachedAt < CACHE_TTL_MS) {
+    return _cachedUrl;
+  }
+
+  // 3. Auto-discover from Vast.ai
+  const discovered = await getWorkerUrlFromInstance();
+  if (discovered) {
+    _cachedUrl = discovered.replace(/\/$/, "");
+    _cachedAt = Date.now();
+    return _cachedUrl;
+  }
+
+  // 4. Fallback: use env var even if it's ngrok (better than nothing)
+  if (envUrl) {
+    return envUrl.replace(/\/$/, "");
+  }
+
+  throw new Error(
+    "Impossible de déterminer l'URL du worker GPU. " +
+    "La VM est peut-être éteinte ou GPU_WORKER_URL n'est pas configuré."
+  );
 }
 
 function workerHeaders(): HeadersInit {
@@ -96,7 +128,8 @@ function connectionError(action: string, err: unknown): Error {
 
 export async function workerHealth() {
   try {
-    const res = await fetch(`${workerUrl()}/health`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/health`, {
       headers: { "ngrok-skip-browser-warning": "true", "User-Agent": "AvatarIA-Worker/1.0" },
     });
     return await safeResponseJson(res, "health");
@@ -114,7 +147,8 @@ export async function generateVideo(body: {
   format?: string;
 }) {
   try {
-    const res = await fetch(`${workerUrl()}/generate`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/generate`, {
       method: "POST",
       headers: workerHeaders(),
       body: JSON.stringify(body),
@@ -127,7 +161,8 @@ export async function generateVideo(body: {
 
 export async function getJobStatus(jobId: string) {
   try {
-    const res = await fetch(`${workerUrl()}/status/${jobId}`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/status/${jobId}`, {
       headers: workerHeaders(),
     });
     return await safeResponseJson(res, "status");
@@ -138,7 +173,8 @@ export async function getJobStatus(jobId: string) {
 
 export async function listJobs() {
   try {
-    const res = await fetch(`${workerUrl()}/jobs`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/jobs`, {
       headers: workerHeaders(),
     });
     return await safeResponseJson(res, "jobs");
@@ -149,7 +185,8 @@ export async function listJobs() {
 
 export async function downloadVideo(jobId: string) {
   try {
-    const res = await fetch(`${workerUrl()}/download/${jobId}`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/download/${jobId}`, {
       headers: workerHeaders(),
     });
     if (!res.ok) {
@@ -176,7 +213,8 @@ export async function downloadVideo(jobId: string) {
 
 export async function listAvatars() {
   try {
-    const res = await fetch(`${workerUrl()}/avatars`, {
+    const url = await resolveWorkerUrl();
+    const res = await fetch(`${url}/avatars`, {
       headers: workerHeaders(),
     });
     return await safeResponseJson(res, "avatars");
@@ -194,7 +232,8 @@ export async function fetchWorkerVoiceSampleBase64(): Promise<{
   filename: string;
 } | null> {
   try {
-    const listRes = await fetch(`${workerUrl()}/voice-samples`, {
+    const url = await resolveWorkerUrl();
+    const listRes = await fetch(`${url}/voice-samples`, {
       headers: workerHeaders(),
     });
     const samples = (await safeResponseJson(listRes, "voice-samples")) as {
@@ -203,7 +242,7 @@ export async function fetchWorkerVoiceSampleBase64(): Promise<{
     if (!Array.isArray(samples) || samples.length === 0) return null;
 
     const filename = samples[0].name;
-    const fileRes = await fetch(`${workerUrl()}/voice-samples/${encodeURIComponent(filename)}`, {
+    const fileRes = await fetch(`${url}/voice-samples/${encodeURIComponent(filename)}`, {
       headers: workerHeaders(),
     });
     if (!fileRes.ok) return null;

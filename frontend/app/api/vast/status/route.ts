@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getInstanceStatus, getBilling } from "@/lib/vast-api";
+import { getInstanceStatus, getBilling, extractWorkerUrl } from "@/lib/vast-api";
 
 export async function GET(request: Request) {
   const session = await auth();
@@ -17,6 +17,8 @@ export async function GET(request: Request) {
       getBilling(),
     ]);
 
+    const workerUrl = extractWorkerUrl(instance);
+
     return NextResponse.json({
       instance: {
         id: instance.id,
@@ -26,6 +28,7 @@ export async function GET(request: Request) {
         cpu_ram: instance.cpu_ram ?? null,
         cost_per_hour: instance.dph_total ?? null,
         start_date: instance.start_date ?? null,
+        worker_url: workerUrl,
       },
       billing: {
         balance: billing.credit ?? billing.balance ?? 0,

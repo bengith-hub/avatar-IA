@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { resolveWorkerUrl } from "@/lib/gpu-api";
 import {
   S3Client,
   PutObjectCommand,
@@ -44,7 +45,8 @@ export async function GET() {
 
   try {
     // Try worker first
-    const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
+    let workerUrl: string | null = null;
+    try { workerUrl = await resolveWorkerUrl(); } catch { /* unavailable */ }
     if (workerUrl) {
       try {
         const res = await fetch(`${workerUrl}/voice-samples`, {
@@ -118,7 +120,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Try worker first (use base64 JSON to avoid ngrok multipart issues)
-    const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
+    let workerUrl: string | null = null;
+    try { workerUrl = await resolveWorkerUrl(); } catch { /* unavailable */ }
     if (workerUrl) {
       try {
         const arrayBuf = await file.arrayBuffer();
@@ -190,7 +193,8 @@ export async function DELETE(req: NextRequest) {
     }
 
     // Try worker first
-    const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
+    let workerUrl: string | null = null;
+    try { workerUrl = await resolveWorkerUrl(); } catch { /* unavailable */ }
     if (workerUrl) {
       try {
         const res = await fetch(`${workerUrl}/voice-samples`, {

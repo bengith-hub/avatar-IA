@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { listAvatars } from "@/lib/gpu-api";
+import { listAvatars, resolveWorkerUrl } from "@/lib/gpu-api";
 import { uploadToR2, listR2Avatars } from "@/lib/r2-avatars";
 
 export async function GET() {
@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Try GPU worker first
-    const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
+    let workerUrl: string | null = null;
+    try { workerUrl = await resolveWorkerUrl(); } catch { /* unavailable */ }
     if (workerUrl) {
       try {
         const workerForm = new FormData();

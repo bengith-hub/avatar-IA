@@ -27,8 +27,8 @@ export const env = {
   get vastApiKey() { return required("VAST_API_KEY"); },
   get vastInstanceId() { return required("VAST_INSTANCE_ID"); },
 
-  // GPU Worker
-  get gpuWorkerUrl() { return required("GPU_WORKER_URL"); },
+  // GPU Worker (URL is auto-discovered from Vast.ai if not set)
+  get gpuWorkerUrl() { return optional("GPU_WORKER_URL"); },
   get gpuWorkerToken() { return required("GPU_WORKER_TOKEN"); },
 
   // Pexels
@@ -69,7 +69,7 @@ export function checkEnvStatus(): Record<string, { configured: boolean; vars: st
       vars: ["AUTH_SECRET", "AUTH_USERNAME", "AUTH_PASSWORD_HASH"],
     },
     vast: check("VAST_API_KEY", "VAST_INSTANCE_ID"),
-    worker: check("GPU_WORKER_URL", "GPU_WORKER_TOKEN"),
+    worker: check("GPU_WORKER_TOKEN"),
     pexels: check("PEXELS_API_KEY"),
     anthropic: check("ANTHROPIC_API_KEY"),
     astria: check("ASTRIA_API_KEY", "ASTRIA_TUNE_ID"),
