@@ -137,8 +137,15 @@ const SceneGenerator = () => {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? "Erreur lors du lancement");
+        const rawText = await res.text();
+        let errorMsg = "Erreur lors du lancement";
+        try {
+          const data = JSON.parse(rawText);
+          errorMsg = data.error ?? errorMsg;
+        } catch {
+          errorMsg = `Erreur serveur (${res.status})`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data = await res.json();
