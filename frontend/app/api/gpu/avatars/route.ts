@@ -30,7 +30,15 @@ export async function GET() {
       // R2 not configured, that's fine
     }
 
-    return NextResponse.json([...workerAvatars, ...r2Avatars]);
+    // Deduplicate: prefer R2 version (has thumbnail URL)
+    const avatarMap = new Map<string, { id: string; name: string; type: string; source: string; url?: string }>();
+    for (const a of workerAvatars) {
+      avatarMap.set(a.id, a);
+    }
+    for (const a of r2Avatars) {
+      avatarMap.set(a.id, a); // R2 overwrites worker (has url for thumbnail)
+    }
+    return NextResponse.json([...avatarMap.values()]);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue";
     return NextResponse.json({ error: message }, { status: 500 });
