@@ -20,6 +20,8 @@ class GenerateRequest(BaseModel):
     background_url: str | None = None
     emotion: str = "neutral"
     format: str = "16:9"
+    avatar_photo_base64: str | None = None
+    avatar_photo_filename: str | None = None
 
 
 class GenerateResponse(BaseModel):

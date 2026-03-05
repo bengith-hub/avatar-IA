@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { generateVideo } from "@/lib/gpu-api";
 
-async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
+async function fetchR2AvatarBase64(avatarId: string): Promise<{
+  base64: string;
+  filename: string;
+}> {
   const { S3Client, GetObjectCommand, ListObjectsV2Command } = await import(
     "@aws-sdk/client-s3"
   );
@@ -41,35 +44,11 @@ async function syncR2AvatarToWorker(avatarId: string): Promise<string> {
 
   const bytes = await getRes.Body.transformToByteArray();
   const ext = obj.Key.split(".").pop() ?? "png";
-  const filename = `${avatarId}.${ext}`;
 
-  const workerUrl = process.env.GPU_WORKER_URL!.replace(/\/$/, "");
-  const base64Data = Buffer.from(bytes).toString("base64");
-
-  const uploadRes = await fetch(`${workerUrl}/avatars/upload-json`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
-      "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "true",
-      "User-Agent": "AvatarIA-Worker/1.0",
-    },
-    body: JSON.stringify({ filename, data_base64: base64Data }),
-  });
-
-  const uploadBody = await uploadRes.text();
-  if (
-    !uploadRes.ok ||
-    uploadBody.includes("<!doctype") ||
-    uploadBody.includes("<!DOCTYPE")
-  ) {
-    throw new Error(
-      `Impossible de joindre la VM GPU (${uploadRes.status}). Vérifiez que le tunnel est actif.`
-    );
-  }
-
-  const result = JSON.parse(uploadBody);
-  return result.id as string;
+  return {
+    base64: Buffer.from(bytes).toString("base64"),
+    filename: `${avatarId}.${ext}`,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -81,9 +60,11 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // If avatar is stored on R2, sync it to the worker first
+    // If avatar is stored on R2, embed the photo in the generate request
     if (typeof body.avatar_id === "string" && body.avatar_id.startsWith("r2-")) {
-      body.avatar_id = await syncR2AvatarToWorker(body.avatar_id);
+      const { base64, filename } = await fetchR2AvatarBase64(body.avatar_id);
+      body.avatar_photo_base64 = base64;
+      body.avatar_photo_filename = filename;
     }
 
     const result = await generateVideo(body);
