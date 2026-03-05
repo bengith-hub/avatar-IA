@@ -6,9 +6,9 @@ let _cachedAt = 0;
 const CACHE_TTL_MS = 60_000;
 
 export async function resolveWorkerUrl(): Promise<string> {
-  // 1. If GPU_WORKER_URL is set and is NOT an ngrok URL, use it directly
+  // 1. If GPU_WORKER_URL is set, use it directly (works with ngrok static domains)
   const envUrl = process.env.GPU_WORKER_URL;
-  if (envUrl && !envUrl.includes("ngrok")) {
+  if (envUrl) {
     return envUrl.replace(/\/$/, "");
   }
 
