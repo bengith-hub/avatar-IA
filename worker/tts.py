@@ -53,10 +53,14 @@ class TTSEngine:
         """Scan model_path for the DAC decoder checkpoint."""
         root = Path(self.model_path)
 
-        # Look for files with dac/decoder/firefly in name
+        # Prefer codec.pth (modded_dac_vq compatible checkpoint)
+        for pth in sorted(root.rglob("codec.pth")):
+            return str(pth)
+
+        # Fallback: look for files with dac/decoder/firefly in name
         for pth in sorted(root.rglob("*.pth")):
             name_lower = pth.name.lower()
-            if any(k in name_lower for k in ("dac", "decoder", "firefly")):
+            if any(k in name_lower for k in ("dac", "decoder", "firefly", "codec")):
                 return str(pth)
 
         # Look inside a "dac" or "decoder" subdirectory
@@ -159,9 +163,9 @@ class TTSEngine:
                 precision=dtype,
             )
 
-            logger.info("Loading DAC decoder (firefly_gan_vq) on %s...", device)
+            logger.info("Loading DAC decoder (modded_dac_vq) on %s...", device)
             decoder = load_dac_model(
-                config_name="firefly_gan_vq",
+                config_name="modded_dac_vq",
                 checkpoint_path=dac_ckpt,
                 device=device,
             )
