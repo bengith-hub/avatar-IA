@@ -123,11 +123,8 @@ const SceneGenerator = () => {
       } catch {
         // Worker not available, use defaults
       }
-      setAvatars([
-        { id: "benjamin-buste", name: "Benjamin Buste" },
-        { id: "benjamin-pied", name: "Benjamin Pied" },
-        { id: "benjamin-assis", name: "Benjamin Assis" },
-      ]);
+      // Fallback: show empty list — user should upload photos via Avatars page
+      setAvatars([]);
     };
     loadAvatars();
   }, []);
