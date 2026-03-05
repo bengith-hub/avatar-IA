@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     console.error("[gpu/generate] Error:", message);
     const isVmOffline =
       message.includes("VM GPU") ||
-      message.includes("tunnel") ||
+      message.includes("ngrok") ||
       message.includes("Impossible de joindre") ||
       message.includes("fetch failed") ||
       message.includes("ECONNREFUSED");
