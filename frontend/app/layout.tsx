@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Providers from "@/components/providers";
 import Sidebar from "@/components/sidebar";
+import ActiveJobBanner from "@/components/active-job-banner";
 import { auth } from "@/lib/auth";
 
 export const metadata: Metadata = {
@@ -23,7 +24,10 @@ export default async function RootLayout({
           {session ? (
             <div className="flex h-screen">
               <Sidebar />
-              <main className="flex-1 overflow-y-auto p-8">{children}</main>
+              <main className="flex-1 overflow-y-auto p-8">
+                <ActiveJobBanner />
+                {children}
+              </main>
             </div>
           ) : (
             children

@@ -4,6 +4,12 @@
   "installCommand": "npm install",
   "framework": "nextjs",
   "regions": ["cdg1"],
+  "crons": [
+    {
+      "path": "/api/vast/auto-stop",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "functions": {
     "app/api/gpu/download/route.ts": {
       "maxDuration": 30
