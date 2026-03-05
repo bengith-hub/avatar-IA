@@ -62,6 +62,56 @@ export async function getInstanceStatus() {
   return data.instances ?? data;
 }
 
+/**
+ * Extract the public worker URL from a Vast.ai instance object.
+ * Vast.ai maps internal port 8000 to a random public port on the instance IP.
+ */
+export function extractWorkerUrl(instance: Record<string, unknown>): string | null {
+  const status =
+    (instance.actual_status as string) ??
+    (instance.intended_status as string) ??
+    (instance.cur_state as string);
+  if (status !== "running") return null;
+
+  const ip =
+    (instance.public_ipaddr as string) ??
+    (instance.ssh_host as string);
+  if (!ip) return null;
+
+  // Vast.ai stores port mappings in `ports` as { "8000/tcp": [{ HostPort: "XXXXX" }] }
+  const ports = instance.ports as
+    | Record<string, Array<{ HostPort?: string }>>
+    | undefined;
+
+  if (ports) {
+    const entry = ports["8000/tcp"];
+    if (entry && entry.length > 0 && entry[0].HostPort) {
+      return `http://${ip}:${entry[0].HostPort}`;
+    }
+  }
+
+  // Fallback: direct_port_start for direct-mapped instances
+  const directPort = instance.direct_port_start as number | undefined;
+  if (directPort) {
+    return `http://${ip}:${directPort}`;
+  }
+
+  // Last fallback: try port 8000 directly
+  return `http://${ip}:8000`;
+}
+
+/**
+ * Fetch instance data and extract the worker URL.
+ */
+export async function getWorkerUrlFromInstance(): Promise<string | null> {
+  try {
+    const instance = await getInstanceStatus();
+    return extractWorkerUrl(instance);
+  } catch {
+    return null;
+  }
+}
+
 export async function getBilling() {
   const res = await fetch(`${VAST_BASE_URL}/api/v0/users/current/`, {
     method: "GET",

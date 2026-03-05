@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { checkEnvStatus } from "@/lib/env";
+import { resolveWorkerUrl } from "@/lib/gpu-api";
 
 interface ServiceStatus {
   name: string;
@@ -59,23 +60,19 @@ export async function GET() {
     services.push({ name: "Vast.ai", status: "not_configured", message: "VAST_API_KEY ou VAST_INSTANCE_ID manquant" });
   }
 
-  // Check GPU Worker
-  if (envStatus.worker.configured) {
-    services.push(
-      await checkService("Worker GPU", async () => {
-        const url = process.env.GPU_WORKER_URL!.replace(/\/$/, "");
-        const res = await fetch(`${url}/health`, {
-          headers: { "ngrok-skip-browser-warning": "true" },
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data.status !== "ok") throw new Error(`Worker status: ${data.status}`);
-      })
-    );
-  } else {
-    services.push({ name: "Worker GPU", status: "not_configured", message: "GPU_WORKER_URL ou GPU_WORKER_TOKEN manquant" });
-  }
+  // Check GPU Worker (auto-discovers URL from Vast.ai if needed)
+  services.push(
+    await checkService("Worker GPU", async () => {
+      const url = await resolveWorkerUrl();
+      const res = await fetch(`${url}/health`, {
+        headers: { "ngrok-skip-browser-warning": "true" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.status !== "ok") throw new Error(`Worker status: ${data.status}`);
+    })
+  );
 
   // Check Pexels
   if (envStatus.pexels.configured) {

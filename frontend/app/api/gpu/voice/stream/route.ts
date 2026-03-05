@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { resolveWorkerUrl } from "@/lib/gpu-api";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -12,9 +13,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const workerUrl = process.env.GPU_WORKER_URL?.replace(/\/$/, "");
-  if (!workerUrl) {
-    return NextResponse.json({ error: "GPU_WORKER_URL non configuré" }, { status: 503 });
+  let workerUrl: string;
+  try {
+    workerUrl = await resolveWorkerUrl();
+  } catch {
+    return NextResponse.json({ error: "Worker GPU non joignable" }, { status: 503 });
   }
 
   try {

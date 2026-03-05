@@ -24,8 +24,8 @@
    VAST_API_KEY=<votre clé Vast.ai>
    VAST_INSTANCE_ID=<ID de votre instance>
 
-   GPU_WORKER_URL=http://<ip_vm>:<port>
-   GPU_WORKER_TOKEN=<token sécurisé>
+   GPU_WORKER_URL=https://votre-domaine.ngrok-free.app
+   GPU_WORKER_TOKEN=<token sécurisé (généré par setup.sh)>
 
    PEXELS_API_KEY=<votre clé Pexels>
    ANTHROPIC_API_KEY=<votre clé Anthropic>
@@ -83,18 +83,35 @@ systemctl start avatar-worker
 curl http://localhost:8000/health
 ```
 
-### Trouver l'URL publique
+### Configurer le tunnel ngrok (URL publique stable)
 
-L'URL du worker est `http://<ip>:<port_public>` où le port public est le mapping
-du port 8000 interne. Visible dans le dashboard Vast.ai sous "Port Mappings".
+La VM Vast.ai (KVM) n'expose pas les ports directement. On utilise **ngrok** avec
+un **domaine statique gratuit** — l'URL ne change jamais, même après redémarrage.
 
-```bash
-# Via l'API Vast.ai
-curl -s "https://console.vast.ai/api/v0/instances/<ID>/" \
-  -H "Authorization: Bearer <VAST_API_KEY>" | python3 -m json.tool
-```
-
-Mettre cette URL dans `GPU_WORKER_URL` sur Vercel.
+1. Créer un compte gratuit sur [ngrok.com](https://ngrok.com)
+2. Dashboard ngrok → **Your Authtoken** → copier le token
+3. Dashboard ngrok → **Domains** → **New Domain** (gratuit, 1 par compte)
+   - Vous obtiendrez une URL comme `votre-nom.ngrok-free.app`
+4. Sur la VM, éditer `.env` :
+   ```bash
+   nano /root/avatar-IA/worker/.env
+   ```
+   Remplir :
+   ```
+   NGROK_AUTHTOKEN=votre_token_ici
+   NGROK_DOMAIN=votre-nom.ngrok-free.app
+   ```
+5. Configurer ngrok et démarrer le tunnel :
+   ```bash
+   ngrok config add-authtoken VOTRE_TOKEN
+   systemctl start avatar-ngrok
+   ```
+6. Vérifier :
+   ```bash
+   curl https://votre-nom.ngrok-free.app/health
+   ```
+7. Dans **Vercel**, mettre `GPU_WORKER_URL=https://votre-nom.ngrok-free.app`
+   - **Cette URL ne change jamais** — à configurer une seule fois.
 
 ---
 
@@ -162,13 +179,19 @@ Déposer un fichier audio dans `/root/avatar-data/voice/` :
 # Logs du worker
 journalctl -u avatar-worker -f
 
-# Redémarrer le worker
+# Logs du tunnel ngrok
+journalctl -u avatar-ngrok -f
+
+# Redémarrer le worker + tunnel
 systemctl restart avatar-worker
+systemctl restart avatar-ngrok
 
 # Mettre à jour le code
 cd /root/avatar-IA && git pull && systemctl restart avatar-worker
 
 # Tester le worker localement
 curl http://localhost:8000/health
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:8000/avatars
+
+# Tester via le tunnel ngrok
+curl https://votre-domaine.ngrok-free.app/health
 ```
