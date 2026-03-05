@@ -22,6 +22,8 @@ class GenerateRequest(BaseModel):
     format: str = "16:9"
     avatar_photo_base64: str | None = None
     avatar_photo_filename: str | None = None
+    voice_sample_base64: str | None = None
+    voice_sample_filename: str | None = None
 
 
 class GenerateResponse(BaseModel):
