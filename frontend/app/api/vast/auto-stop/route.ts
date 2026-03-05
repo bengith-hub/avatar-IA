@@ -5,9 +5,12 @@ import { workerHealth } from "@/lib/gpu-api";
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 export async function GET(request: Request) {
+  // Accept Vercel Cron calls (CRON_SECRET via header) or internal calls
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  const isVercelCron = request.headers.get("x-vercel-cron") === "1";
+
+  if (cronSecret && !isVercelCron && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
