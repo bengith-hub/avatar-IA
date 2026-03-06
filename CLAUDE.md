@@ -31,10 +31,11 @@ avatar-IA/
 ### Worker (worker/)
 
 - **Framework** : FastAPI, Python 3.11+
-- **Runtime** : VM GPU Vast.ai (Ubuntu 22.04, RTX 4090 ou A100)
-- **IA** : HunyuanVideo-Avatar (animation) + FishAudio S1-mini (TTS/voice clone)
+- **Runtime** : VM GPU Vast.ai (Ubuntu 22.04, RTX 3090 24GB)
+- **IA** : HunyuanVideo-Avatar (animation, subprocess via CSV) + FishAudio OpenAudio S1-mini (TTS/voice clone)
 - **Post-prod** : ffmpeg (installé sur la VM)
 - **Sécurité** : auth par Bearer token dans le header `Authorization`
+- **Tunnel** : ngrok (domaine statique) pour exposer le worker au frontend Vercel
 
 ## APIs externes intégrées
 
@@ -152,18 +153,31 @@ worker/
 ## Worker API endpoints
 
 ```
-GET  /health                    → { status, gpu_name, gpu_memory, uptime }
-POST /generate                  → { job_id }
-     body: { text, language, avatar_id, background_url?, emotion?, format? }
-GET  /status/{job_id}           → { job_id, status, progress?, result_url?, error? }
-GET  /jobs                      → [ { job_id, status, created_at, ... } ]
-GET  /download/{job_id}         → MP4 file
-GET  /avatars                   → [ { id, name, path, type } ]
-POST /avatars                   → { id, name, path }
-     body: multipart (file)
+GET  /health                        → { status, gpu_name, gpu_memory, uptime, models_loaded, active_jobs }
+POST /generate                      → { job_id }
+     body: { text, language, avatar_id, background_url?, emotion?, format?,
+             avatar_photo_base64?, avatar_photo_filename?,
+             voice_sample_base64?, voice_sample_filename? }
+GET  /status/{job_id}               → { job_id, status, progress?, result_url?, error? }
+GET  /jobs                          → [ { job_id, status, created_at, ... } ]
+GET  /download/{job_id}             → MP4 file
+GET  /avatars                       → [ { id, name, path } ]
+POST /avatars                       → { id, name, path }  (multipart file)
+POST /avatars/upload-json           → { id, name, path }  (base64 JSON, évite problèmes ngrok)
+GET  /voice-samples                 → [ { name, url, size, source } ]
+POST /voice-samples                 → { name, url, size }  (multipart file)
+POST /voice-samples/upload-json     → { name, url, size }  (base64 JSON)
+GET  /voice-samples/{filename}      → fichier audio
+DELETE /voice-samples               → { success }  body: { name }
 ```
 
 Tous les endpoints (sauf /health) requièrent `Authorization: Bearer <WORKER_TOKEN>`.
+
+### Notes sur /generate
+
+- `avatar_photo_base64` + `avatar_photo_filename` : permet d'envoyer la photo avatar inline (le worker la sauvegarde dans `photos/`)
+- `voice_sample_base64` + `voice_sample_filename` : idem pour l'échantillon vocal
+- Les endpoints `*-json` avec base64 contournent les problèmes de multipart via ngrok
 
 ## Commandes de développement
 
@@ -225,10 +239,13 @@ R2_BUCKET=avatar-videos
 ```
 WORKER_TOKEN=
 HUNYUAN_MODEL_PATH=/root/avatar-data/models/hunyuan
+HUNYUAN_INSTALL_PATH=/root/HunyuanVideo-Avatar
 FISH_MODEL_PATH=/root/avatar-data/models/fish-audio
 PHOTOS_PATH=/root/avatar-data/photos
 VOICE_PATH=/root/avatar-data/voice
 OUTPUT_PATH=/root/avatar-data/outputs
+NGROK_AUTHTOKEN=
+NGROK_DOMAIN=
 ```
 
 ## Règles importantes
@@ -278,8 +295,42 @@ Ordre strict de construction :
   - Les photos générées servent de référence pour HunyuanVideo-Avatar
 - **HunyuanVideo-Avatar** : inference Python, prend image + audio → génère vidéo
   - Repo : https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar
-  - Min VRAM : 10GB (avec TeaCache), recommandé 24GB+
-- **FishAudio S1** : TTS Python, prend texte + audio ref → génère wav
+  - Installé dans `/root/HunyuanVideo-Avatar/` sur la VM
+  - Exécuté en subprocess via `hymm_sp/sample_gpu_poor.py` avec CSV en entrée
+  - Args clés : `--cpu-offload --use-fp8 --infer-min --sample-n-frames 129 --image-size 704`
+  - Min VRAM : 10GB (avec TeaCache), recommandé 24GB+ (RTX 3090 = 24GB, suffisant avec cpu-offload)
+- **FishAudio OpenAudio S1-mini** : TTS Python, prend texte + audio ref → génère wav
   - Repo : https://github.com/fishaudio/fish-speech
+  - Modèle : `openaudio-s1-mini` (téléchargé via HuggingFace dans `/root/avatar-data/models/fish-audio/openaudio-s1-mini/`)
   - Clone vocal zero-shot : 10-30s d'échantillon
   - 13+ langues : FR, EN, DE, ES, JP, KO, AR, ZH, RU, NL, IT, PL, PT
+
+## Patchs de compatibilité connus
+
+- **torchaudio >= 2.1** : `list_audio_backends()` a été supprimé. fish-speech l'appelle en interne à l'import. Monkey-patch appliqué dans `worker/main.py` (top-level, avant tout import fish-speech) :
+  ```python
+  import torchaudio
+  if not hasattr(torchaudio, "list_audio_backends"):
+      torchaudio.list_audio_backends = lambda: ["soundfile"]
+  ```
+
+## Architecture VM (Vast.ai)
+
+```
+/root/
+├── avatar-IA/               ← clone du repo (worker/ utilisé)
+├── avatar-data/
+│   ├── models/
+│   │   ├── fish-audio/
+│   │   │   └── openaudio-s1-mini/   ← model.pth + codec.pth
+│   │   └── hunyuan/                 ← (non utilisé directement)
+│   ├── photos/                      ← photos référence avatar
+│   ├── voice/                       ← échantillon vocal (.wav)
+│   └── outputs/                     ← vidéos générées par job
+└── HunyuanVideo-Avatar/             ← clone du repo Tencent
+    ├── hymm_sp/sample_gpu_poor.py   ← script d'inférence (subprocess)
+    └── weights/ckpts/               ← poids modèle (téléchargés via HuggingFace)
+```
+
+- **HunyuanVideo-Avatar** est exécuté en subprocess (pas importé en Python) via `avatar.py`
+- Mode `--cpu-offload --use-fp8 --infer-min` pour tenir dans 24GB VRAM (RTX 3090)

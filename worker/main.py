@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+# Compatibility patch: torchaudio >= 2.1 removed list_audio_backends()
+# Must be applied before any fish-speech import triggers it
+try:
+    import torchaudio
+    if not hasattr(torchaudio, "list_audio_backends"):
+        torchaudio.list_audio_backends = lambda: ["soundfile"]
+except ImportError:
+    pass
+
 import asyncio
 import logging
 import os
