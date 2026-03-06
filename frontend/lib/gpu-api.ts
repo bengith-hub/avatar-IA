@@ -6,7 +6,7 @@ let _cachedAt = 0;
 const CACHE_TTL_MS = 60_000;
 
 export async function resolveWorkerUrl(): Promise<string> {
-  // 1. If GPU_WORKER_URL is set, use it directly (works with ngrok static domains)
+  // 1. If GPU_WORKER_URL is set, use it directly (manual override)
   const envUrl = process.env.GPU_WORKER_URL;
   if (envUrl) {
     return envUrl.replace(/\/$/, "");
@@ -17,7 +17,7 @@ export async function resolveWorkerUrl(): Promise<string> {
     return _cachedUrl;
   }
 
-  // 3. Auto-discover from Vast.ai
+  // 3. Auto-discover from Vast.ai API (Docker port mapping)
   const discovered = await getWorkerUrlFromInstance();
   if (discovered) {
     _cachedUrl = discovered.replace(/\/$/, "");
@@ -25,14 +25,9 @@ export async function resolveWorkerUrl(): Promise<string> {
     return _cachedUrl;
   }
 
-  // 4. Fallback: use env var even if it's ngrok (better than nothing)
-  if (envUrl) {
-    return envUrl.replace(/\/$/, "");
-  }
-
   throw new Error(
     "Impossible de déterminer l'URL du worker GPU. " +
-    "La VM est peut-être éteinte ou GPU_WORKER_URL n'est pas configuré."
+    "La VM est peut-être éteinte ou VAST_INSTANCE_ID n'est pas configuré."
   );
 }
 
@@ -40,38 +35,22 @@ function workerHeaders(): HeadersInit {
   return {
     Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
     "Content-Type": "application/json",
-    "ngrok-skip-browser-warning": "true",
     "User-Agent": "AvatarIA-Worker/1.0",
   };
-}
-
-function isNgrokErrorPage(body: string): boolean {
-  return (
-    body.includes("ERR_NGROK") ||
-    (body.includes("ngrok") && body.includes("<html")) ||
-    (body.includes("Tunnel") && body.includes("<html"))
-  );
 }
 
 function isHtmlPage(body: string): boolean {
   return body.includes("<!DOCTYPE") || body.trimStart().startsWith("<html");
 }
 
-/** Read response body as text and detect ngrok HTML pages (even on 200). */
+/** Read response body as text and detect unexpected HTML responses. */
 async function safeResponseJson(res: Response, action: string): Promise<unknown> {
   const body = await res.text();
 
-  // Detect ngrok tunnel error pages
-  if (isNgrokErrorPage(body)) {
-    throw new Error(
-      `Le tunnel ngrok a renvoyé une page d'erreur (${action}). L'URL du tunnel a peut-être changé. Vérifiez GPU_WORKER_URL.`
-    );
-  }
-
-  // Detect any HTML response (not JSON) — likely ngrok interstitial or proxy error
+  // Detect HTML response instead of expected JSON (proxy error, wrong URL, etc.)
   if (isHtmlPage(body)) {
     throw new Error(
-      `Le worker a renvoyé du HTML au lieu de JSON (${action}, HTTP ${res.status}). Le tunnel ngrok est peut-être inactif ou l'URL a changé.`
+      `Le worker a renvoyé du HTML au lieu de JSON (${action}, HTTP ${res.status}). La VM est peut-être inaccessible.`
     );
   }
 
@@ -104,13 +83,13 @@ function connectionError(action: string, err: unknown): Error {
   const msg = err instanceof Error ? err.message : String(err);
 
   // Already a descriptive error from safeResponseJson
-  if (msg.includes("tunnel") || msg.includes("Worker:") || msg.includes("worker")) {
+  if (msg.includes("Worker:") || msg.includes("worker") || msg.includes("VM")) {
     return err instanceof Error ? err : new Error(msg);
   }
 
   if (msg.includes("fetch failed") || msg.includes("ECONNREFUSED")) {
     return new Error(
-      `Connexion refusée (${action}). La VM est peut-être éteinte ou le tunnel ngrok n'est pas lancé.`
+      `Connexion refusée (${action}). La VM est peut-être éteinte ou le worker n'est pas démarré.`
     );
   }
   if (msg.includes("ETIMEDOUT")) {
@@ -120,7 +99,7 @@ function connectionError(action: string, err: unknown): Error {
   }
   if (msg.includes("ENOTFOUND")) {
     return new Error(
-      `URL introuvable (${action}). Vérifiez que GPU_WORKER_URL est correcte.`
+      `URL introuvable (${action}). Vérifiez que VAST_INSTANCE_ID est correct.`
     );
   }
   return err instanceof Error ? err : new Error(msg);
@@ -130,7 +109,7 @@ export async function workerHealth() {
   try {
     const url = await resolveWorkerUrl();
     const res = await fetch(`${url}/health`, {
-      headers: { "ngrok-skip-browser-warning": "true", "User-Agent": "AvatarIA-Worker/1.0" },
+      headers: { "User-Agent": "AvatarIA-Worker/1.0" },
     });
     return await safeResponseJson(res, "health");
   } catch (err) {
@@ -191,18 +170,18 @@ export async function downloadVideo(jobId: string) {
     });
     if (!res.ok) {
       const body = await res.text();
-      if (isNgrokErrorPage(body) || isHtmlPage(body)) {
+      if (isHtmlPage(body)) {
         throw new Error(
-          "Le tunnel ngrok a renvoyé une erreur au lieu du fichier vidéo. Vérifiez GPU_WORKER_URL."
+          "Le worker a renvoyé du HTML au lieu du fichier vidéo. La VM est peut-être inaccessible."
         );
       }
       throw workerError("download", res.status, body);
     }
-    // Check content-type to detect ngrok HTML on 200
+    // Check content-type to detect unexpected HTML response
     const ct = res.headers.get("content-type") ?? "";
     if (ct.includes("text/html")) {
       throw new Error(
-        "Le worker a renvoyé du HTML au lieu d'une vidéo. Le tunnel ngrok est peut-être inactif."
+        "Le worker a renvoyé du HTML au lieu d'une vidéo. Vérifiez que le worker est bien démarré."
       );
     }
     return res;
