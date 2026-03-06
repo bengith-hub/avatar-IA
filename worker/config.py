@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     photos_path: str = "/root/avatar-data/photos"
     voice_path: str = "/root/avatar-data/voice"
     output_path: str = "/root/avatar-data/outputs"
+    ngrok_authtoken: str = ""
+    ngrok_domain: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
