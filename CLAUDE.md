@@ -313,8 +313,13 @@ Ordre strict de construction :
   if not hasattr(torchaudio, "list_audio_backends"):
       torchaudio.list_audio_backends = lambda: ["soundfile"]
   ```
+- **diffusers / transformers** : les versions récentes de `transformers` (>= 5.x) suppriment `FLAX_WEIGHTS_NAME` que `diffusers` importe. Pinner à `diffusers==0.32.2` + `transformers==4.47.1`.
+- **flash-attn** : requis par HunyuanVideo-Avatar (`flash_attn.flash_attn_interface`). Nécessite `CUDA_HOME` + `nvcc` pour compiler. Utiliser un template Vast.ai "devel" avec CUDA toolkit.
+- **torchcodec** : requis par torchaudio au runtime. Installer avec `pip install torchcodec`.
 
 ## Architecture VM (Vast.ai)
+
+**IMPORTANT** : Choisir un template Vast.ai avec CUDA toolkit (image "devel", pas "runtime") pour pouvoir compiler flash-attn.
 
 ```
 /root/
@@ -322,15 +327,48 @@ Ordre strict de construction :
 ├── avatar-data/
 │   ├── models/
 │   │   ├── fish-audio/
-│   │   │   └── openaudio-s1-mini/   ← model.pth + codec.pth
+│   │   │   ├── fish-speech/         ← clone du repo (pip install -e .)
+│   │   │   └── openaudio-s1-mini/   ← model.pth + codec.pth (~2GB)
 │   │   └── hunyuan/                 ← (non utilisé directement)
 │   ├── photos/                      ← photos référence avatar
 │   ├── voice/                       ← échantillon vocal (.wav)
 │   └── outputs/                     ← vidéos générées par job
 └── HunyuanVideo-Avatar/             ← clone du repo Tencent
     ├── hymm_sp/sample_gpu_poor.py   ← script d'inférence (subprocess)
-    └── weights/ckpts/               ← poids modèle (téléchargés via HuggingFace)
+    └── weights/                     ← poids modèle (~76GB, téléchargés via HuggingFace)
+        └── ckpts/
+            ├── hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states_fp8.pt
+            ├── whisper-tiny/
+            └── det_align/
 ```
 
 - **HunyuanVideo-Avatar** est exécuté en subprocess (pas importé en Python) via `avatar.py`
 - Mode `--cpu-offload --use-fp8 --infer-min` pour tenir dans 24GB VRAM (RTX 3090)
+- **Pas de venv** sur la VM — tout installé en global (système Python 3.10)
+- Les services systemd utilisent `/usr/local/bin/uvicorn` (pas de venv/bin/)
+
+## Dépendances pip critiques (VM)
+
+Versions testées et fonctionnelles :
+
+```
+torch>=2.1 (avec CUDA, ex: cu121 ou cu128)
+torchaudio>=2.1
+torchcodec>=0.10
+diffusers==0.32.2
+transformers==4.47.1
+flash-attn>=2.5 (compilé avec nvcc)
+fish-speech (pip install -e . depuis le clone)
+soundfile
+```
+
+## Procédure setup nouvelle VM
+
+1. Choisir template Vast.ai **avec CUDA toolkit** (image "devel")
+2. SSH dans la VM
+3. `git clone https://github.com/bengith-hub/avatar-IA.git && cd avatar-IA/worker && bash setup.sh`
+4. Configurer `.env` (token, ngrok)
+5. Ajouter photos + voix dans `/root/avatar-data/`
+6. `systemctl start avatar-worker && systemctl start avatar-ngrok`
+
+Le script `setup.sh` gère tout : dépendances, clones, téléchargement poids, services systemd.
