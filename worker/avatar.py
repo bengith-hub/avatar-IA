@@ -150,18 +150,19 @@ class AvatarEngine:
         use_fp8 = "fp8" in os.path.basename(self._checkpoint).lower()
 
         # Build inference command
-        # RTX 3090 (24GB): use 65 frames + 512px to fit in VRAM
-        # 65 frames ≈ 2.6s at 25fps, 129 frames ≈ 5.2s
+        # RTX 3090 (24GB): VRAM-constrained settings
+        # 33 frames ≈ 1.3s at 25fps (minimum viable for lip-sync demo)
+        # TODO: upgrade to 48GB+ GPU for production quality (129 frames, 704px)
         cmd = [
             sys.executable,
             "hymm_sp/sample_gpu_poor.py",
             "--input", csv_path,
             "--ckpt", self._checkpoint,
-            "--sample-n-frames", "65",
+            "--sample-n-frames", "33",
             "--seed", "128",
-            "--image-size", "512",
+            "--image-size", "384",
             "--cfg-scale", "7.5",
-            "--infer-steps", "30",
+            "--infer-steps", "25",
             "--use-deepcache", "1",
             "--flow-shift-eval-video", "5.0",
             "--save-path", job_results_dir,
