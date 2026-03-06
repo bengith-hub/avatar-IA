@@ -150,16 +150,18 @@ class AvatarEngine:
         use_fp8 = "fp8" in os.path.basename(self._checkpoint).lower()
 
         # Build inference command
+        # RTX 3090 (24GB): use 65 frames + 512px to fit in VRAM
+        # 65 frames ≈ 2.6s at 25fps, 129 frames ≈ 5.2s
         cmd = [
             sys.executable,
             "hymm_sp/sample_gpu_poor.py",
             "--input", csv_path,
             "--ckpt", self._checkpoint,
-            "--sample-n-frames", "129",
+            "--sample-n-frames", "65",
             "--seed", "128",
-            "--image-size", "704",
+            "--image-size", "512",
             "--cfg-scale", "7.5",
-            "--infer-steps", "50",
+            "--infer-steps", "30",
             "--use-deepcache", "1",
             "--flow-shift-eval-video", "5.0",
             "--save-path", job_results_dir,
@@ -175,6 +177,7 @@ class AvatarEngine:
             "CPU_OFFLOAD": "1",
             "PYTHONPATH": ".",
             "CUDA_VISIBLE_DEVICES": "0",
+            "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
         }
 
         logger.info("Running HunyuanVideo-Avatar: %s", " ".join(cmd[:8]) + " ...")
