@@ -109,6 +109,10 @@ class TTSEngine:
 
         try:
             import torch
+            # Compatibility patch: torchaudio >= 2.1 removed list_audio_backends()
+            import torchaudio
+            if not hasattr(torchaudio, "list_audio_backends"):
+                torchaudio.list_audio_backends = lambda: ["soundfile"]
             from fish_speech.inference_engine import TTSInferenceEngine
             from fish_speech.models.dac.inference import load_model as load_dac_model
             from fish_speech.models.text2semantic.inference import (
