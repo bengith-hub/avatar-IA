@@ -25,13 +25,15 @@ avatar-IA/
 ### Communication Frontend ↔ Worker
 
 ```
-[Navigateur] → [Vercel API Routes /api/gpu/*] → [ngrok Cloud Endpoint] → [VM Vast.ai :8000]
+[Navigateur] → [Vercel API Routes /api/gpu/*] → [VM Vast.ai IP:port (auto-detect)] → [:8000 interne]
 ```
 
 - Le frontend ne contacte JAMAIS la VM directement
 - Toutes les requêtes passent par les API routes Next.js (protection des clés API)
-- Le tunnel ngrok utilise un **Cloud Endpoint** avec URL fixe (pas de changement à chaque restart)
-- URL ngrok actuelle : `tarsha-irruptive-sabra.ngrok-free.dev`
+- **L'URL du worker est résolue dynamiquement** via l'API Vast.ai (`GET /instances/{id}`) à chaque requête
+- L'instance Vast.ai est de type **Docker** : le port 8000 interne est mappé automatiquement vers un port externe (ex: 28042)
+- L'IP et le port externe changent à chaque redémarrage de l'instance → d'où l'auto-detect
+- `GPU_WORKER_URL` dans Vercel est **optionnel** (fallback/override manuel uniquement)
 
 ### Frontend (frontend/)
 
@@ -51,7 +53,7 @@ avatar-IA/
 - **IA** : HunyuanVideo-Avatar (animation, subprocess via CSV) + FishAudio OpenAudio S1-mini (TTS/voice clone)
 - **Post-prod** : ffmpeg (installé sur la VM)
 - **Sécurité** : auth par Bearer token dans le header `Authorization`
-- **Tunnel** : ngrok (domaine statique gratuit) pour exposer le worker au frontend Vercel
+- **Réseau** : instance Docker Vast.ai avec port 8000 mappé automatiquement (pas de tunnel nécessaire)
 
 ## APIs externes intégrées
 
@@ -63,7 +65,7 @@ avatar-IA/
 | Astria | frontend (API routes) | `ASTRIA_API_KEY`, `ASTRIA_TUNE_ID` | Génération photos avatar IA |
 | Canva Connect | frontend (API routes) | `CANVA_*` | Upload clip → ouvrir dans Canva |
 | Cloudflare R2 | frontend (API routes) | `R2_*` | Stockage vidéos + avatars (S3-compatible) |
-| Worker GPU | frontend (API routes) | `GPU_WORKER_URL`, `GPU_WORKER_TOKEN` | Proxy vers la VM |
+| Worker GPU | frontend (API routes) | `GPU_WORKER_TOKEN`, `VAST_INSTANCE_ID` | Proxy vers la VM (URL auto-détectée via Vast.ai API) |
 
 ## Conventions de code
 
@@ -162,7 +164,7 @@ frontend/
 │   ├── auth.ts                 ← Config NextAuth v5 (CredentialsProvider, SHA-256)
 │   ├── env.ts                  ← Validation variables d'env (required/optional)
 │   ├── vast-api.ts             ← Client Vast.ai REST
-│   ├── gpu-api.ts              ← Client Worker API (avec détection erreurs ngrok)
+│   ├── gpu-api.ts              ← Client Worker API (auto-detect URL via Vast.ai API)
 │   ├── pexels-api.ts           ← Client Pexels
 │   ├── anthropic-api.ts        ← Client Anthropic (scripts)
 │   ├── astria-api.ts           ← Client Astria (génération photos avatar)
@@ -225,7 +227,7 @@ Tous les endpoints (sauf /health) requièrent `Authorization: Bearer <WORKER_TOK
 
 - `avatar_photo_base64` + `avatar_photo_filename` : permet d'envoyer la photo avatar inline (le worker la sauvegarde dans `photos/`)
 - `voice_sample_base64` + `voice_sample_filename` : idem pour l'échantillon vocal
-- Les endpoints `*-json` avec base64 contournent les problèmes de multipart via ngrok
+- Les endpoints `*-json` avec base64 sont conservés (héritage ngrok, mais fonctionnent aussi en direct — à simplifier plus tard si souhaité)
 
 ## Commandes de développement
 
@@ -269,10 +271,10 @@ AUTH_PASSWORD_HASH=         # SHA-256 du mot de passe
 
 # Vast.ai
 VAST_API_KEY=
-VAST_INSTANCE_ID=
+VAST_INSTANCE_ID=           # Actuellement : 32454128
 
 # GPU Worker
-GPU_WORKER_URL=             # URL ngrok (optionnel, auto-découverte via Vast.ai sinon)
+GPU_WORKER_URL=             # OPTIONNEL — override manuel (sinon auto-détecté via Vast.ai API)
 GPU_WORKER_TOKEN=
 
 # Services
@@ -305,8 +307,9 @@ FISH_MODEL_PATH=/root/avatar-data/models/fish-audio
 PHOTOS_PATH=/root/avatar-data/photos
 VOICE_PATH=/root/avatar-data/voice
 OUTPUT_PATH=/root/avatar-data/outputs
-NGROK_AUTHTOKEN=
-NGROK_DOMAIN=
+# ngrok (OBSOLÈTE — conservé pour référence, plus nécessaire avec instance Docker)
+# NGROK_AUTHTOKEN=
+# NGROK_DOMAIN=
 ```
 
 ## Règles importantes
@@ -320,7 +323,7 @@ NGROK_DOMAIN=
 7. **Le worker doit démarrer même si les modèles IA ne sont pas chargés** — `/health` indique l'état de chargement. Les modèles se chargent au premier appel ou au démarrage.
 8. **Gestion d'erreurs explicite partout.** Pas de fail silencieux. Le frontend affiche les erreurs clairement.
 9. **Arrêt automatique VM** : un cron Vercel (`/api/vast/auto-stop`) s'exécute chaque nuit à 03h00 UTC pour éviter les coûts inutiles.
-10. **gpu-api.ts détecte les erreurs ngrok** (page HTML d'interstitiel) et retourne des messages d'erreur clairs.
+10. **Auto-detect URL Worker** : `gpu-api.ts` résout l'URL du worker via l'API Vast.ai (IP:port dynamique). `GPU_WORKER_URL` n'est qu'un override optionnel.
 
 ## Contexte technique supplémentaire
 
@@ -369,10 +372,26 @@ NGROK_DOMAIN=
 - **torchvision** : requis par HunyuanVideo-Avatar (`hymm_sp/data_kits/audio_dataset.py` l'importe). Installé avec PyTorch : `pip install torch torchvision torchaudio`.
 - **torchcodec** : requis par torchaudio au runtime. Installer avec `pip install torchcodec`.
 - **pydantic-settings / config.py** : `BaseSettings` lit toutes les variables du `.env`. Si une variable existe dans `.env` mais pas dans la classe `Settings`, pydantic lève `extra_forbidden`. **Toute nouvelle variable ajoutée au `.env` doit être déclarée dans `worker/config.py`** avec une valeur par défaut (ex: `ngrok_authtoken: str = ""`).
-- **ngrok authtoken** : le service systemd passe `NGROK_AUTHTOKEN` via `EnvironmentFile`, mais **ngrok CLI lit son authtoken depuis `~/.config/ngrok/ngrok.yml`**, PAS depuis les variables d'environnement. Il faut impérativement exécuter `ngrok config add-authtoken TOKEN` une fois. Le `setup.sh` le fait automatiquement si `NGROK_AUTHTOKEN` est rempli dans le `.env`.
+- **ngrok (OBSOLÈTE)** : plus nécessaire depuis le passage aux instances Docker Vast.ai avec port mapping direct. Conservé ici pour référence si retour à une instance KVM :
+  - ngrok CLI lit son authtoken depuis `~/.config/ngrok/ngrok.yml`, PAS depuis les variables d'environnement
+  - `ngrok config add-authtoken TOKEN` doit être exécuté une fois
+  - Le Cloud Endpoint utilisait l'URL fixe `tarsha-irruptive-sabra.ngrok-free.dev`
 - **NextAuth v5** : utilise `AUTH_SECRET` comme nom de variable principal, mais `NEXTAUTH_SECRET` fonctionne aussi (voir `lib/env.ts`).
 
 ## Architecture VM (Vast.ai)
+
+### Instance actuelle
+
+| Info | Valeur |
+|------|--------|
+| **Instance ID** | `32454128` |
+| **Type** | Docker (port mapping automatique) |
+| **IP publique** | `182.64.125.233` (dynamique — change au restart) |
+| **SSH** | `ssh -p 28136 root@182.64.125.233` |
+| **Worker** | `http://182.64.125.233:28042` → port 8000 interne |
+| **IP type** | Dynamic |
+
+> **IMPORTANT** : L'IP et les ports externes changent à chaque redémarrage. C'est pourquoi le frontend auto-détecte l'URL via l'API Vast.ai.
 
 ### Exigences minimales VM (CRITIQUE)
 
@@ -382,6 +401,7 @@ NGROK_DOMAIN=
 | **RAM** | 25GB (avec swap) | **32GB+** | 25GB → OOM kills fréquents, swap obligatoire |
 | **Disque** | 150GB | **200GB+** | Poids modèle 76GB + libs 20GB + OS 10GB + swap 4-8GB |
 | **Image** | devel (avec nvcc) | `pytorch:*-cuda12.1-devel` | **PAS "runtime"** — nvcc requis pour compiler flash-attn |
+| **Type instance** | **Docker** | Docker | Port mapping auto, pas besoin de ngrok |
 | **Python** | 3.10 | 3.10 | Système (pas de venv) |
 
 **IMPORTANT** : 126GB de disque est **TROP JUSTE** — on a eu des problèmes de disque plein (99%) qui cassent ngrok et empêchent les générations. Toujours prendre 200GB+.
@@ -499,12 +519,10 @@ Filtres recommandés :
    - Affiche un résumé de toutes les versions installées
 5. Configurer `.env` : `nano /root/avatar-IA/worker/.env`
    - Copier le `WORKER_TOKEN` généré (affiché dans la sortie du script)
-   - Ajouter `NGROK_AUTHTOKEN` et `NGROK_DOMAIN`
 6. Ajouter photos + voix dans `/root/avatar-data/`
-7. `ngrok config add-authtoken VOTRE_TOKEN`
-8. `systemctl start avatar-worker && systemctl start avatar-ngrok`
-9. Tester : `curl http://localhost:8000/health`
-10. Mettre à jour `GPU_WORKER_URL` et `GPU_WORKER_TOKEN` dans Vercel
+7. `systemctl start avatar-worker`
+8. Tester : `curl http://localhost:8000/health`
+9. Mettre à jour `GPU_WORKER_TOKEN` et `VAST_INSTANCE_ID` dans Vercel (l'URL est auto-détectée)
 
 ### Si flash-attn échoue (pas de nvcc)
 
@@ -529,22 +547,20 @@ pip cache purge  # libérer le cache pip
 |----------|-------|----------|
 | OOM kill du worker | RAM insuffisante + cpu-offload | Ajouter swap : `fallocate -l 8G /swapfile && mkswap /swapfile && swapon /swapfile` |
 | Disque plein (99%) | Cache apt/pip + poids modèle | `apt-get clean && pip cache purge` — prochaine fois prendre 200GB+ |
-| Erreur ngrok "page d'erreur" | Disque plein OU URL changée | Vérifier `df -h /` puis `systemctl restart avatar-ngrok` |
+| Erreur ngrok "page d'erreur" | (OBSOLÈTE — ngrok supprimé) | Utiliser instance Docker avec port mapping direct |
 | `ModuleNotFoundError: torchvision` | Pas installé | `pip install torchvision` |
 | `ModuleNotFoundError: torchcodec` | Pas installé | `pip install torchcodec` |
 | flash-attn compilation 30min+ | Normal avec nvcc | Attendre — 2x `cicc` à 100% CPU est normal |
 | `list_audio_backends` error | torchaudio >= 2.1 | Monkey-patch dans main.py/tts.py (déjà fait) |
 | `FLAX_WEIGHTS_NAME` error | transformers trop récent | `pip install diffusers==0.32.2 transformers==4.47.1` |
-| ngrok `ERR_NGROK_4018` (authtoken) | `ngrok config add-authtoken` jamais exécuté | `ngrok config add-authtoken VOTRE_TOKEN` (ngrok lit `~/.config/ngrok/ngrok.yml`, PAS les env vars) |
-| pydantic `extra_forbidden` au démarrage worker | `.env` contient des vars pas dans `config.py` Settings | Ajouter les champs manquants dans `worker/config.py` (ex: `ngrok_authtoken: str = ""`) |
-| ngrok `ERR_NGROK_8012` (Bad Gateway) | Worker pas encore prêt après restart | Attendre 10s après `systemctl restart avatar-worker` avant de tester |
+| pydantic `extra_forbidden` au démarrage worker | `.env` contient des vars pas dans `config.py` Settings | Ajouter les champs manquants dans `worker/config.py` |
 
 ### Commandes de monitoring utiles
 
 ```bash
 watch -n 2 nvidia-smi              # GPU (VRAM, utilisation)
 journalctl -u avatar-worker -f     # Logs worker en temps réel
-journalctl -u avatar-ngrok -f      # Logs ngrok
+# journalctl -u avatar-ngrok -f   # (OBSOLÈTE — ngrok supprimé)
 htop                               # CPU/RAM
 df -h /                            # Espace disque
 free -h                            # RAM + swap
@@ -567,8 +583,8 @@ typescript@^5
 
 ## Décisions d'architecture clés
 
-1. **ngrok Cloud Endpoint** (pas juste ngrok agent) : URL fixe permanente, pas besoin de mettre à jour GPU_WORKER_URL à chaque restart
-2. **JSON base64 au lieu de multipart** : ngrok retourne une page HTML interstitielle sur les POST multipart → tous les uploads passent par `/upload-json` avec fichier encodé en base64
+1. **Instance Docker Vast.ai + auto-detect** : le frontend résout l'URL du worker via l'API Vast.ai à chaque requête. Plus besoin de ngrok ni de mettre à jour manuellement `GPU_WORKER_URL` (ancien système : ngrok Cloud Endpoint avec URL fixe — supprimé car trop fragile et source de bugs)
+2. **JSON base64 au lieu de multipart** : héritage de ngrok (qui retournait une page HTML sur les POST multipart). Les endpoints `/upload-json` avec base64 sont conservés — fonctionnent aussi en accès direct. Simplification possible plus tard vers multipart classique
 3. **Proxy R2** (`/api/r2/[...key]`) : les URLs publiques R2 donnent des erreurs SSL → route proxy qui stream les fichiers avec Content-Type correct et cache 1h
 4. **Voice sample sync via base64** : l'échantillon vocal est uploadé sur R2, puis envoyé en base64 dans le body de `/generate` pour que le worker le sauvegarde localement
 5. **localStorage pour persistence** : état du formulaire Generate, photos Astria, jobs actifs — tout persiste dans localStorage (initialisé dans useEffect pour éviter l'erreur React hydration #418)
@@ -615,12 +631,23 @@ typescript@^5
 - Interface de génération (script assistant, formulaire, persistence état)
 - Job tracking cross-pages (bannière globale `active-job-banner.tsx`)
 - Auto-stop VM (cron daily)
-- Tunnel ngrok permanent (Cloud Endpoint)
+- Auto-detect URL Worker via Vast.ai API (remplace ngrok)
 
 ### Ce qui reste à tester/finaliser
 - **Pipeline end-to-end** : photo → TTS → HunyuanVideo → MP4 (jamais testé complètement)
 - **Git pull sur VM** : les derniers fixes doivent être pull + restart worker après chaque push
 - **Export Canva** : intégration OAuth en place mais pas testée end-to-end
+- **Auto-detect Vast.ai** : implémenter dans `gpu-api.ts` la résolution dynamique d'URL via Vast.ai API
+- **Nettoyage ngrok** : supprimer les refs ngrok dans `setup.sh`, `config.py`, le service systemd `avatar-ngrok`
+
+### Historique ngrok (référence si besoin de rollback)
+
+L'ancien système utilisait ngrok Cloud Endpoint pour exposer le port 8000 de la VM (type KVM, pas de port mapping natif) :
+- URL fixe : `tarsha-irruptive-sabra.ngrok-free.dev`
+- Service systemd : `avatar-ngrok`
+- Config : `NGROK_AUTHTOKEN` + `NGROK_DOMAIN` dans `.env`
+- Problèmes rencontrés : interstitiel HTML sur POST multipart, ERR_NGROK_4018 (authtoken), ERR_NGROK_8012 (bad gateway), disque plein cassait ngrok
+- Raison de l'abandon : trop fragile, source de bugs récurrents, instance Docker avec port direct = plus simple
 
 ## Préférences utilisateur
 
