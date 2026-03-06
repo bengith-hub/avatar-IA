@@ -47,7 +47,7 @@ export async function GET() {
     services.push(
       await checkService("Vast.ai", async () => {
         const res = await fetch(
-          `https://console.vast.ai/api/v0/instances/${process.env.VAST_INSTANCE_ID}/`,
+          `https://cloud.vast.ai/api/v0/instances/${process.env.VAST_INSTANCE_ID}/`,
           {
             headers: { Authorization: `Bearer ${process.env.VAST_API_KEY}` },
             signal: AbortSignal.timeout(10000),
@@ -65,7 +65,7 @@ export async function GET() {
     await checkService("Worker GPU", async () => {
       const url = await resolveWorkerUrl();
       const res = await fetch(`${url}/health`, {
-        headers: { "ngrok-skip-browser-warning": "true" },
+        headers: { "User-Agent": "AvatarIA-Worker/1.0" },
         signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

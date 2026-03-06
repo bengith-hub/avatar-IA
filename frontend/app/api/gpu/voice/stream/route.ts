@@ -26,7 +26,6 @@ export async function GET(req: NextRequest) {
       {
         headers: {
           Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
-          "ngrok-skip-browser-warning": "true",
           "User-Agent": "AvatarIA-Worker/1.0",
         },
       }

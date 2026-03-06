@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Try worker first (use base64 JSON to avoid ngrok multipart issues)
+    // Try worker first (use base64 JSON to avoid multipart issues)
     let workerUrl: string | null = null;
     try { workerUrl = await resolveWorkerUrl(); } catch { /* unavailable */ }
     if (workerUrl) {
@@ -131,7 +131,6 @@ export async function POST(req: NextRequest) {
           headers: {
             Authorization: `Bearer ${process.env.GPU_WORKER_TOKEN}`,
             "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",
             "User-Agent": "AvatarIA-Worker/1.0",
           },
           body: JSON.stringify({
