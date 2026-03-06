@@ -396,6 +396,7 @@ Versions testées et fonctionnelles :
 
 ```
 torch>=2.1 (avec CUDA, ex: cu121 ou cu128)
+torchvision>=0.16 (requis par HunyuanVideo-Avatar)
 torchaudio>=2.1
 torchcodec>=0.10
 diffusers==0.32.2
