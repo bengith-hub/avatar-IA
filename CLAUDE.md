@@ -12,30 +12,34 @@ Deux apps distinctes dans un monorepo :
 
 ```
 avatar-IA/
-├── frontend/    → Next.js 14+ (App Router) déployé sur Vercel
-├── worker/      → FastAPI (Python 3.11+) déployé sur VM GPU Vast.ai
-├── assets/      → Photos référence + échantillon vocal (git-ignored, stockés sur VM)
-├── docs/        → Documentation projet (SPEC.md = spécification complète)
+├── frontend/    → Next.js 16 (App Router) déployé sur Vercel
+├── worker/      → FastAPI (Python 3.10+) déployé sur VM GPU Vast.ai
+├── docs/        → Documentation projet
+│   ├── DEPLOY.md   → Guide de déploiement complet
+│   └── STACK.md    → Vue d'ensemble de la stack technique
+├── SPEC.md      → Spécification produit complète
 └── CLAUDE.md    → Ce fichier
 ```
 
 ### Frontend (frontend/)
 
-- **Framework** : Next.js 14+ avec App Router, TypeScript strict
-- **Déploiement** : Vercel (plan gratuit)
-- **Auth** : NextAuth.js avec CredentialsProvider (un seul utilisateur : Benjamin)
-- **Styling** : Tailwind CSS
-- **Composants UI** : shadcn/ui
-- **État** : React hooks (useState, useEffect, useSWR pour le polling). Pas de state manager externe.
+- **Framework** : Next.js 16.1.6 avec App Router, TypeScript strict
+- **Déploiement** : Vercel (plan gratuit, région cdg1 / Paris)
+- **Auth** : NextAuth.js v5 (beta.30) avec CredentialsProvider (un seul utilisateur : Benjamin)
+- **Middleware** : `proxy.ts` — middleware NextAuth qui protège toutes les routes sauf `/login`, `/api/auth`, assets statiques
+- **Styling** : Tailwind CSS v4
+- **Composants UI** : shadcn/ui, lucide-react (icônes), class-variance-authority
+- **État** : React hooks (useState, useEffect). Pas de state manager externe.
+- **Stockage** : Cloudflare R2 via @aws-sdk/client-s3
 
 ### Worker (worker/)
 
-- **Framework** : FastAPI, Python 3.11+
-- **Runtime** : VM GPU Vast.ai (Ubuntu 22.04, RTX 3090 24GB)
+- **Framework** : FastAPI, Python 3.10 (système sur VM Vast.ai, pas de venv)
+- **Runtime** : VM GPU Vast.ai (Ubuntu 22.04, RTX 3090/4090 24GB ou A100)
 - **IA** : HunyuanVideo-Avatar (animation, subprocess via CSV) + FishAudio OpenAudio S1-mini (TTS/voice clone)
 - **Post-prod** : ffmpeg (installé sur la VM)
 - **Sécurité** : auth par Bearer token dans le header `Authorization`
-- **Tunnel** : ngrok (domaine statique) pour exposer le worker au frontend Vercel
+- **Tunnel** : ngrok (domaine statique gratuit) pour exposer le worker au frontend Vercel
 
 ## APIs externes intégrées
 
@@ -46,7 +50,7 @@ avatar-IA/
 | Anthropic | frontend (API routes) | `ANTHROPIC_API_KEY` | Génération de scripts IA |
 | Astria | frontend (API routes) | `ASTRIA_API_KEY`, `ASTRIA_TUNE_ID` | Génération photos avatar IA |
 | Canva Connect | frontend (API routes) | `CANVA_*` | Upload clip → ouvrir dans Canva |
-| Cloudflare R2 | frontend (API routes) | `R2_*` | Stockage vidéos (S3-compatible) |
+| Cloudflare R2 | frontend (API routes) | `R2_*` | Stockage vidéos + avatars (S3-compatible) |
 | Worker GPU | frontend (API routes) | `GPU_WORKER_URL`, `GPU_WORKER_TOKEN` | Proxy vers la VM |
 
 ## Conventions de code
@@ -61,10 +65,11 @@ avatar-IA/
 - Pas de `"use client"` sauf nécessité (préférer les Server Components)
 - Gestion d'erreurs : try/catch dans les API routes, retourner des `NextResponse.json()` avec status codes appropriés
 - Pas de console.log en production — utiliser un logger si nécessaire
+- Utilitaire `cn()` dans `lib/cn.ts` pour combiner classes Tailwind (clsx + tailwind-merge)
 
 ### Python (worker)
 
-- Python 3.11+, type hints partout
+- Python 3.10+ (système sur VM Vast.ai, pas de venv), type hints partout
 - Formateur : black (ligne max 100)
 - Linter : ruff
 - Async FastAPI avec `async def` pour les endpoints
@@ -87,23 +92,34 @@ frontend/
 ├── app/
 │   ├── layout.tsx              ← Root layout + providers (auth, theme)
 │   ├── page.tsx                ← Dashboard GPU (start/stop, coûts, statut)
+│   ├── login/
+│   │   └── page.tsx            ← Page de connexion
 │   ├── generate/
 │   │   └── page.tsx            ← Générateur de scènes
 │   ├── gallery/
 │   │   └── page.tsx            ← Galerie des vidéos générées
 │   ├── avatars/
 │   │   └── page.tsx            ← Gestion photos ref + voix
+│   ├── settings/
+│   │   └── page.tsx            ← Page paramètres (statut services, env vars)
 │   └── api/
 │       ├── auth/[...nextauth]/route.ts
+│       ├── health/route.ts         ← GET → health check frontend
 │       ├── vast/
 │       │   ├── start/route.ts      ← POST → démarre VM
 │       │   ├── stop/route.ts       ← POST → arrête VM
-│       │   └── status/route.ts     ← GET → statut + billing
+│       │   ├── status/route.ts     ← GET → statut + billing
+│       │   └── auto-stop/route.ts  ← Cron Vercel (03h00 UTC) → arrêt auto VM
 │       ├── gpu/
 │       │   ├── generate/route.ts   ← POST → lance génération
 │       │   ├── status/route.ts     ← GET → statut job
 │       │   ├── jobs/route.ts       ← GET → liste jobs
-│       │   └── download/route.ts   ← GET → télécharge MP4
+│       │   ├── download/route.ts   ← GET → télécharge MP4
+│       │   ├── health/route.ts     ← GET → health check worker GPU
+│       │   ├── avatars/route.ts    ← GET/POST → gestion avatars sur worker
+│       │   └── voice/
+│       │       ├── route.ts        ← GET/POST/DELETE → gestion voix sur worker
+│       │       └── stream/route.ts ← GET → streaming audio voix
 │       ├── pexels/
 │       │   └── search/route.ts     ← GET → recherche décors
 │       ├── ai/
@@ -112,27 +128,47 @@ frontend/
 │       │   ├── generate/route.ts   ← POST → lance génération photo Astria
 │       │   ├── status/route.ts     ← GET → statut prompt Astria
 │       │   └── callback/route.ts   ← POST → callback webhook Astria
-│       └── canva/
-│           └── upload/route.ts     ← POST → upload vers Canva
+│       ├── canva/
+│       │   └── upload/route.ts     ← POST → upload vers Canva
+│       └── r2/
+│           ├── [...key]/route.ts   ← GET → proxy lecture objets R2
+│           ├── upload/route.ts     ← POST → upload fichier vers R2
+│           └── stream/route.ts     ← GET → streaming vidéo depuis R2
 ├── components/
-│   ├── gpu-status-card.tsx
-│   ├── scene-generator.tsx
-│   ├── avatar-selector.tsx
-│   ├── background-picker.tsx
-│   ├── script-assistant.tsx
-│   ├── canva-launcher.tsx
-│   ├── video-player.tsx
-│   └── export-options.tsx
-└── lib/
-    ├── vast-api.ts             ← Client Vast.ai REST
-    ├── gpu-api.ts              ← Client Worker API
-    ├── pexels-api.ts           ← Client Pexels
-    ├── canva-api.ts            ← Client Canva Connect
-    ├── anthropic-api.ts        ← Client Anthropic (scripts)
-    ├── astria-api.ts           ← Client Astria (génération photos avatar)
-    ├── r2.ts                   ← Client Cloudflare R2
-    └── auth.ts                 ← Config NextAuth
+│   ├── gpu-status-card.tsx     ← Carte statut GPU (dashboard)
+│   ├── scene-generator.tsx     ← Formulaire de génération
+│   ├── avatar-selector.tsx     ← Sélecteur d'avatar (photo ref)
+│   ├── background-picker.tsx   ← Recherche/sélection décors Pexels
+│   ├── script-assistant.tsx    ← Assistant IA pour écrire les scripts
+│   ├── canva-launcher.tsx      ← Bouton export vers Canva
+│   ├── video-player.tsx        ← Lecteur vidéo MP4
+│   ├── export-options.tsx      ← Options d'export (R2, Canva, download)
+│   ├── active-job-banner.tsx   ← Bannière de job en cours (header)
+│   ├── sidebar.tsx             ← Navigation latérale
+│   └── providers.tsx           ← Provider SessionProvider (NextAuth)
+├── lib/
+│   ├── auth.ts                 ← Config NextAuth v5 (CredentialsProvider, SHA-256)
+│   ├── env.ts                  ← Validation variables d'env (required/optional)
+│   ├── vast-api.ts             ← Client Vast.ai REST
+│   ├── gpu-api.ts              ← Client Worker API (avec détection erreurs ngrok)
+│   ├── pexels-api.ts           ← Client Pexels
+│   ├── anthropic-api.ts        ← Client Anthropic (scripts)
+│   ├── astria-api.ts           ← Client Astria (génération photos avatar)
+│   ├── canva-api.ts            ← Client Canva Connect
+│   ├── r2.ts                   ← Client Cloudflare R2 (vidéos)
+│   ├── r2-avatars.ts           ← Client R2 pour gestion avatars (photos)
+│   └── cn.ts                   ← Utilitaire classes CSS (clsx + tailwind-merge)
+├── proxy.ts                    ← Middleware NextAuth (protection routes)
+├── vercel.json                 ← Config Vercel (crons, timeouts, région)
+└── .env.local.example          ← Template variables d'environnement
 ```
+
+## Vercel Configuration
+
+Le fichier `vercel.json` configure :
+- **Région** : `cdg1` (Paris, pour la latence depuis la France)
+- **Cron job** : `/api/vast/auto-stop` exécuté tous les jours à 03h00 UTC (arrêt auto VM)
+- **Timeouts étendus** : download/generate GPU (30s), upload Canva/R2 (60s), script AI (30s)
 
 ## Structure worker détaillée
 
@@ -144,9 +180,9 @@ worker/
 ├── avatar.py               ← Interface HunyuanVideo-Avatar (photo+wav → mp4)
 ├── postprocess.py          ← ffmpeg : normalisation, format, compositing
 ├── models.py               ← Pydantic models (requests/responses)
-├── config.py               ← Settings depuis env vars
-├── jobs.py                 ← Gestion jobs (file, statuts, résultats)
-├── requirements.txt
+├── config.py               ← Settings depuis env vars (pydantic-settings)
+├── jobs.py                 ← Gestion jobs in-memory (file, statuts, résultats)
+├── requirements.txt        ← Dépendances pip (hors torch/IA, installées par setup.sh)
 └── setup.sh                ← Script d'installation VM (one-shot)
 ```
 
@@ -188,7 +224,7 @@ cd frontend
 npm install              # installer dépendances
 npm run dev              # dev server (localhost:3000)
 npm run build            # build production
-npm run lint             # linter
+npm run lint             # linter (eslint)
 npx tsc --noEmit         # type check
 ```
 
@@ -213,21 +249,34 @@ ruff check .             # linter
 ### frontend/.env.local
 
 ```
-NEXTAUTH_SECRET=
+# Auth
+NEXTAUTH_SECRET=            # ou AUTH_SECRET (NextAuth v5 supporte les deux)
 NEXTAUTH_URL=http://localhost:3000
 AUTH_USERNAME=benjamin
-AUTH_PASSWORD_HASH=
+AUTH_PASSWORD_HASH=         # SHA-256 du mot de passe
+
+# Vast.ai
 VAST_API_KEY=
 VAST_INSTANCE_ID=
-GPU_WORKER_URL=
+
+# GPU Worker
+GPU_WORKER_URL=             # URL ngrok (optionnel, auto-découverte via Vast.ai sinon)
 GPU_WORKER_TOKEN=
+
+# Services
 PEXELS_API_KEY=
 ANTHROPIC_API_KEY=
+
+# Astria (optionnel)
 ASTRIA_API_KEY=
 ASTRIA_TUNE_ID=
+
+# Canva (optionnel — Phase 2)
 CANVA_CLIENT_ID=
 CANVA_CLIENT_SECRET=
 CANVA_ACCESS_TOKEN=
+
+# Cloudflare R2 (optionnel — Phase 2)
 R2_ACCOUNT_ID=
 R2_ACCESS_KEY=
 R2_SECRET_KEY=
@@ -255,25 +304,11 @@ NGROK_DOMAIN=
 3. **Le frontend ne contacte JAMAIS les APIs externes directement depuis le client.** Toujours via les API routes (pour protéger les clés API).
 4. **Les jobs de génération sont asynchrones.** `/generate` retourne immédiatement un `job_id`. Le frontend poll `/status/{job_id}` toutes les 5 secondes.
 5. **Les vidéos générées sont stockées sur R2** après génération, pas servies directement depuis la VM.
-6. **Auth obligatoire** sur toutes les pages et API routes (sauf la page de login).
+6. **Auth obligatoire** sur toutes les pages et API routes (sauf la page de login). Le middleware `proxy.ts` gère ça automatiquement.
 7. **Le worker doit démarrer même si les modèles IA ne sont pas chargés** — `/health` indique l'état de chargement. Les modèles se chargent au premier appel ou au démarrage.
 8. **Gestion d'erreurs explicite partout.** Pas de fail silencieux. Le frontend affiche les erreurs clairement.
-
-## Priorité d'implémentation (Phase 1 — MVP)
-
-Ordre strict de construction :
-
-1. `frontend/` : scaffold Next.js + auth + layout avec navigation
-2. `frontend/app/api/vast/` : routes start/stop/status
-3. `frontend/app/page.tsx` : Dashboard GPU fonctionnel
-4. `worker/main.py` + `worker/models.py` + `worker/config.py` : FastAPI scaffold + auth middleware
-5. `worker/tts.py` : intégration FishAudio S1
-6. `worker/avatar.py` : intégration HunyuanVideo-Avatar
-7. `worker/pipeline.py` : chaîne complète texte → MP4
-8. `frontend/app/api/gpu/` : routes proxy vers worker
-9. `frontend/app/generate/page.tsx` : interface de génération
-10. `frontend/app/gallery/page.tsx` : galerie basique
-11. Test end-to-end : texte → clip MP4 téléchargeable
+9. **Arrêt automatique VM** : un cron Vercel (`/api/vast/auto-stop`) s'exécute chaque nuit à 03h00 UTC pour éviter les coûts inutiles.
+10. **gpu-api.ts détecte les erreurs ngrok** (page HTML d'interstitiel) et retourne des messages d'erreur clairs.
 
 ## Contexte technique supplémentaire
 
@@ -307,19 +342,24 @@ Ordre strict de construction :
 
 ## Patchs de compatibilité connus
 
-- **torchaudio >= 2.1** : `list_audio_backends()` a été supprimé. fish-speech l'appelle en interne à l'import. Monkey-patch appliqué dans `worker/main.py` (top-level, avant tout import fish-speech) :
+- **torchaudio >= 2.1** : `list_audio_backends()` a été supprimé. fish-speech l'appelle en interne à l'import. Monkey-patch appliqué dans `worker/main.py` ET `worker/tts.py` (top-level, avant tout import fish-speech) :
   ```python
   import torchaudio
   if not hasattr(torchaudio, "list_audio_backends"):
       torchaudio.list_audio_backends = lambda: ["soundfile"]
   ```
 - **diffusers / transformers** : les versions récentes de `transformers` (>= 5.x) suppriment `FLAX_WEIGHTS_NAME` que `diffusers` importe. Pinner à `diffusers==0.32.2` + `transformers==4.47.1`.
-- **flash-attn** : requis par HunyuanVideo-Avatar (`flash_attn.flash_attn_interface`). Nécessite `CUDA_HOME` + `nvcc` pour compiler. Utiliser un template Vast.ai "devel" avec CUDA toolkit.
+- **flash-attn** : requis par HunyuanVideo-Avatar (`flash_attn.flash_attn_interface`). Options d'installation (dans l'ordre) :
+  1. **Wheels précompilés** (rapide) : `pip install flash-attn` — fonctionne si un wheel correspond à votre combo Python/CUDA/torch
+  2. **Compilation** (5-15 min) : nécessite `CUDA_HOME` + `nvcc`. Utiliser un template Vast.ai "devel" avec CUDA toolkit, ou installer manuellement : `apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1`
+  3. **Avec ninja** (accélère la compilation) : `pip install ninja && pip install flash-attn --no-build-isolation`
+  - Si les wheels précompilés échouent avec "inconsistent version", c'est un bug pip connu → passer à la compilation
 - **torchcodec** : requis par torchaudio au runtime. Installer avec `pip install torchcodec`.
+- **NextAuth v5** : utilise `AUTH_SECRET` comme nom de variable principal, mais `NEXTAUTH_SECRET` fonctionne aussi (voir `lib/env.ts`).
 
 ## Architecture VM (Vast.ai)
 
-**IMPORTANT** : Choisir un template Vast.ai avec CUDA toolkit (image "devel", pas "runtime") pour pouvoir compiler flash-attn.
+**IMPORTANT** : Choisir un template Vast.ai avec CUDA toolkit (image "devel", pas "runtime") pour pouvoir compiler flash-attn. Vérifier avec `nvcc --version`.
 
 ```
 /root/
@@ -337,15 +377,18 @@ Ordre strict de construction :
     ├── hymm_sp/sample_gpu_poor.py   ← script d'inférence (subprocess)
     └── weights/                     ← poids modèle (~76GB, téléchargés via HuggingFace)
         └── ckpts/
-            ├── hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states_fp8.pt
+            ├── hunyuan-video-t2v-720p/
+            │   ├── transformers/mp_rank_00_model_states_fp8.pt
+            │   └── vae/pytorch_model.pt
             ├── whisper-tiny/
             └── det_align/
 ```
 
 - **HunyuanVideo-Avatar** est exécuté en subprocess (pas importé en Python) via `avatar.py`
-- Mode `--cpu-offload --use-fp8 --infer-min` pour tenir dans 24GB VRAM (RTX 3090)
+- Mode `--cpu-offload --use-fp8 --infer-min` pour tenir dans 24GB VRAM (RTX 3090/4090)
 - **Pas de venv** sur la VM — tout installé en global (système Python 3.10)
 - Les services systemd utilisent `/usr/local/bin/uvicorn` (pas de venv/bin/)
+- Variable d'environnement `MODEL_BASE` passée au subprocess (pointe vers `weights/`)
 
 ## Dépendances pip critiques (VM)
 
@@ -357,18 +400,65 @@ torchaudio>=2.1
 torchcodec>=0.10
 diffusers==0.32.2
 transformers==4.47.1
-flash-attn>=2.5 (compilé avec nvcc)
+flash-attn>=2.5 (compilé avec nvcc, ou wheel précompilé)
+ninja (accélère la compilation flash-attn)
 fish-speech (pip install -e . depuis le clone)
 soundfile
+huggingface_hub (pour téléchargement des poids modèle)
 ```
+
+### requirements.txt du worker (dépendances directes)
+
+```
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-multipart==0.0.20
+python-dotenv==1.0.1
+httpx==0.28.1
+aiofiles==24.1.0
+```
+
+Les dépendances IA (torch, transformers, fish-speech, flash-attn...) sont installées séparément par `setup.sh`.
 
 ## Procédure setup nouvelle VM
 
-1. Choisir template Vast.ai **avec CUDA toolkit** (image "devel")
+1. Choisir template Vast.ai **avec CUDA toolkit** (image "devel") — vérifier avec `nvcc --version`
 2. SSH dans la VM
 3. `git clone https://github.com/bengith-hub/avatar-IA.git && cd avatar-IA/worker && bash setup.sh`
 4. Configurer `.env` (token, ngrok)
 5. Ajouter photos + voix dans `/root/avatar-data/`
-6. `systemctl start avatar-worker && systemctl start avatar-ngrok`
+6. `ngrok config add-authtoken VOTRE_TOKEN`
+7. `systemctl start avatar-worker && systemctl start avatar-ngrok`
 
-Le script `setup.sh` gère tout : dépendances, clones, téléchargement poids, services systemd.
+Le script `setup.sh` gère tout : dépendances système, pip, clones repos IA, téléchargement poids (~76GB), services systemd, installation ngrok.
+
+### Si flash-attn échoue (pas de nvcc)
+
+```bash
+# Installer CUDA toolkit manuellement
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+dpkg -i cuda-keyring_1.1-1_all.deb
+apt-get update && apt-get install -y cuda-toolkit-12-1
+export CUDA_HOME=/usr/local/cuda-12.1
+export PATH=$CUDA_HOME/bin:$PATH
+
+# Puis installer flash-attn
+pip install ninja
+pip install flash-attn --no-build-isolation
+```
+
+## Dépendances frontend (package.json)
+
+```
+next@16.1.6
+react@19.2.3 / react-dom@19.2.3
+next-auth@5.0.0-beta.30
+@aws-sdk/client-s3@^3.1001.0
+class-variance-authority@^0.7.1
+clsx@^2.1.1 / tailwind-merge@^3.5.0
+lucide-react@^0.577.0
+tailwindcss@^4 / @tailwindcss/postcss@^4
+typescript@^5
+```
