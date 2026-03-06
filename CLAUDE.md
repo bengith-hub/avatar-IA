@@ -5,6 +5,7 @@
 Avatar IA personnel pour Benjamin (Amarillo Search). Site web privé qui génère des vidéos avatar réalistes (corps entier, voix clonée multilingue) et les envoie dans Canva Pro pour la finition.
 
 Repo : https://github.com/bengith-hub/avatar-IA
+URL prod : https://avatar-ia-self.vercel.app
 
 ## Architecture
 
@@ -20,6 +21,17 @@ avatar-IA/
 ├── SPEC.md      → Spécification produit complète
 └── CLAUDE.md    → Ce fichier
 ```
+
+### Communication Frontend ↔ Worker
+
+```
+[Navigateur] → [Vercel API Routes /api/gpu/*] → [ngrok Cloud Endpoint] → [VM Vast.ai :8000]
+```
+
+- Le frontend ne contacte JAMAIS la VM directement
+- Toutes les requêtes passent par les API routes Next.js (protection des clés API)
+- Le tunnel ngrok utilise un **Cloud Endpoint** avec URL fixe (pas de changement à chaque restart)
+- URL ngrok actuelle : `tarsha-irruptive-sabra.ngrok-free.dev`
 
 ### Frontend (frontend/)
 
@@ -552,3 +564,69 @@ lucide-react@^0.577.0
 tailwindcss@^4 / @tailwindcss/postcss@^4
 typescript@^5
 ```
+
+## Décisions d'architecture clés
+
+1. **ngrok Cloud Endpoint** (pas juste ngrok agent) : URL fixe permanente, pas besoin de mettre à jour GPU_WORKER_URL à chaque restart
+2. **JSON base64 au lieu de multipart** : ngrok retourne une page HTML interstitielle sur les POST multipart → tous les uploads passent par `/upload-json` avec fichier encodé en base64
+3. **Proxy R2** (`/api/r2/[...key]`) : les URLs publiques R2 donnent des erreurs SSL → route proxy qui stream les fichiers avec Content-Type correct et cache 1h
+4. **Voice sample sync via base64** : l'échantillon vocal est uploadé sur R2, puis envoyé en base64 dans le body de `/generate` pour que le worker le sauvegarde localement
+5. **localStorage pour persistence** : état du formulaire Generate, photos Astria, jobs actifs — tout persiste dans localStorage (initialisé dans useEffect pour éviter l'erreur React hydration #418)
+6. **Auto-stop VM** : cron Vercel daily à 3h UTC (limitation Hobby plan, pas de cron minute) → arrête la VM si idle >30min ou worker injoignable
+7. **Astria pour photos** : tune ID `4233645`, trigger token `ohwx man` auto-injecté dans les prompts (`astria-api.ts`)
+8. **Self-hosted TTS/Avatar** : choix délibéré de garder fish-speech + HunyuanVideo au lieu d'ElevenLabs, pour garder la propriété intellectuelle
+9. **Vercel Hobby plan** : 100 déploiements/jour max, 1 cron/jour max — batchtrer les changements avant de push
+
+## Bugs historiques résolus (session initiale)
+
+### NextAuth / Auth
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| 400 sur `/api/auth/session` | `AUTH_URL` pointait vers le dashboard Vercel | Supprimer `AUTH_URL`, utiliser `trustHost: true` |
+| 400 persistant | Code cherchait `NEXTAUTH_SECRET`, Vercel avait `AUTH_SECRET` | Fallback `process.env.AUTH_SECRET \|\| process.env.NEXTAUTH_SECRET` |
+| `middleware.ts` deprecation | Next.js 16 renomme en `proxy.ts` | Renommer fichier + export `proxy` au lieu de `middleware` |
+| Edge Runtime crash SHA-256 | `crypto.createHash` = Node.js only | Migré vers `crypto.subtle.digest` (Web Crypto API) |
+
+### Vast.ai API
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| Statut "unknown" | Réponse wrappée dans `{ instances: {...} }` | Unwrapper la réponse |
+| Statut "unknown" (2) | Base URL `console.vast.ai` obsolète | Utiliser `cloud.vast.ai` |
+| Balance $0.00 | Champ `balance` toujours à 0 | Utiliser `credit \|\| balance` |
+
+### Frontend React
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| Hydration error #418 | `localStorage.getItem()` pendant SSR | Initialiser avec defaults, restaurer dans `useEffect` |
+| État perdu au changement de page | State React réinitialisé | Persistence localStorage + polling job actif |
+| 500 `<!doctype` | `auth()` hors try/catch + import S3 crash serverless | Wrapper dans try/catch + import dynamique S3 |
+| "tunnel" faux positif | `isOfflineError()` matchait tout "tunnel" | Restreint à "ngrok" et "Tunnel" (majuscule) |
+
+## Statut actuel (mars 2026)
+
+### Ce qui fonctionne
+- Auth (login/logout)
+- Dashboard GPU (start/stop VM, billing, statut)
+- Génération photos Astria (avec persistence localStorage)
+- Upload avatars et voice samples (R2 + VM sync)
+- Interface de génération (script assistant, formulaire, persistence état)
+- Job tracking cross-pages (bannière globale `active-job-banner.tsx`)
+- Auto-stop VM (cron daily)
+- Tunnel ngrok permanent (Cloud Endpoint)
+
+### Ce qui reste à tester/finaliser
+- **Pipeline end-to-end** : photo → TTS → HunyuanVideo → MP4 (jamais testé complètement)
+- **Git pull sur VM** : les derniers fixes doivent être pull + restart worker après chaque push
+- **Export Canva** : intégration OAuth en place mais pas testée end-to-end
+
+## Préférences utilisateur
+
+- Benjamin est débutant terminal — privilégier les actions web/navigateur, minimiser SSH
+- iPad-first : boutons 48-56px, fonts 18px+
+- Préfère les choix multiples (AskUserQuestion) aux questions ouvertes
+- Langue : français
+- Veut tout documenter pour ne pas perdre la mémoire entre sessions
+- Frustré par les cycles debug terminal → tout faire via l'interface web si possible
