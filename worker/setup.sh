@@ -386,6 +386,19 @@ if ! command -v ngrok &> /dev/null; then
     apt-get clean
 fi
 
+# Configure ngrok authtoken (CRITICAL: ngrok CLI reads from ~/.config/ngrok/ngrok.yml,
+# NOT from environment variables. The EnvironmentFile in systemd is not enough.)
+if [ -f "$ENV_FILE" ]; then
+    NGROK_TOKEN=$(grep '^NGROK_AUTHTOKEN=' "$ENV_FILE" | cut -d= -f2)
+    if [ -n "$NGROK_TOKEN" ]; then
+        ngrok config add-authtoken "$NGROK_TOKEN"
+        echo "ngrok authtoken configured."
+    else
+        echo "WARNING: NGROK_AUTHTOKEN is empty in .env — ngrok will not work."
+        echo "  After filling it in, run: ngrok config add-authtoken YOUR_TOKEN"
+    fi
+fi
+
 # ngrok tunnel service
 cat > /etc/systemd/system/avatar-ngrok.service << EOF
 [Unit]
