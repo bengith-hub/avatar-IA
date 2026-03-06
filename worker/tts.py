@@ -22,6 +22,26 @@ class TTSEngine:
     def is_loaded(self) -> bool:
         return self._loaded
 
+    def unload_model(self) -> None:
+        """Unload TTS model from GPU to free VRAM for HunyuanVideo."""
+        if not self._loaded:
+            return
+        logger.info("Unloading TTS model from GPU to free VRAM...")
+        self._engine = None
+        self._loaded = False
+        try:
+            import torch
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                free, total = torch.cuda.mem_get_info()
+                logger.info("VRAM after TTS unload: %.1f GB free / %.1f GB total",
+                            free / 1e9, total / 1e9)
+        except Exception as e:
+            logger.warning("Error during VRAM cleanup: %s", e)
+
     # ------------------------------------------------------------------
     # Checkpoint discovery
     # ------------------------------------------------------------------

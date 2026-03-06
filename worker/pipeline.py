@@ -72,6 +72,9 @@ async def run_pipeline(job_id: str) -> None:
         job_manager.update_job(job_id, progress=0.25)
         logger.info("[%s] TTS completed in %.1fs", job_id, time.time() - start_time)
 
+        # Free VRAM: unload TTS model before loading HunyuanVideo (~18 GB)
+        tts_engine.unload_model()
+
         # Step 2: Avatar video (photo + wav → raw mp4)
         step2_start = time.time()
         logger.info("[%s] Step 2/3: Generating avatar video (emotion=%s)",
