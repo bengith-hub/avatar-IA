@@ -33,7 +33,7 @@ echo "========================================="
 echo ""
 
 # --- Pre-flight checks ---
-echo "[0/13] Pre-flight checks..."
+echo "[0/12] Pre-flight checks..."
 
 # Check disk space
 DISK_AVAIL_GB=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
@@ -70,7 +70,7 @@ fi
 echo ""
 
 # --- System packages ---
-echo "[1/13] Installing system packages..."
+echo "[1/12] Installing system packages..."
 apt-get update -qq
 apt-get install -y -qq \
     git git-lfs \
@@ -87,7 +87,7 @@ apt-get clean
 rm -rf /var/lib/apt/lists/*
 
 # --- Detect CUDA ---
-echo "[2/13] Detecting CUDA installation..."
+echo "[2/12] Detecting CUDA installation..."
 if [ -z "${CUDA_HOME:-}" ]; then
     # Try common locations (newest first)
     for cuda_dir in /usr/local/cuda /usr/local/cuda-12.8 /usr/local/cuda-12.6 \
@@ -141,7 +141,7 @@ else
 fi
 
 # --- Swap file (prevents OOM kills during generation) ---
-echo "[3/13] Setting up swap file..."
+echo "[3/12] Setting up swap file..."
 if [ ! -f /swapfile ]; then
     # Use 4GB swap — enough to prevent OOM, not too much disk
     # (flash-attn compilation uses ~14GB RAM with 2 cicc processes)
@@ -167,12 +167,12 @@ fi
 free -h | grep -i swap
 
 # --- Data directories ---
-echo "[4/13] Creating data directories..."
+echo "[4/12] Creating data directories..."
 DATA_DIR="/root/avatar-data"
 mkdir -p "$DATA_DIR"/{models/hunyuan,models/fish-audio,photos,voice,outputs}
 
 # --- Clone project ---
-echo "[5/13] Cloning project repository..."
+echo "[5/12] Cloning project repository..."
 PROJECT_DIR="/root/avatar-IA"
 if [ -d "$PROJECT_DIR" ]; then
     cd "$PROJECT_DIR" && git pull origin main
@@ -181,7 +181,7 @@ else
 fi
 
 # --- Python dependencies (system-wide, no venv) ---
-echo "[6/13] Installing Python dependencies..."
+echo "[6/12] Installing Python dependencies..."
 cd "$PROJECT_DIR/worker"
 pip install --upgrade pip setuptools wheel
 
@@ -216,9 +216,17 @@ pip install -r requirements.txt
 # soundfile: required for audio file I/O
 pip install torchcodec soundfile
 
-# Pin diffusers/transformers versions (CRITICAL — newer versions break imports)
+# Pin diffusers/transformers versions (CRITICAL — version mismatch breaks everything)
 # transformers >= 5.x removes FLAX_WEIGHTS_NAME that diffusers imports
-pip install diffusers==0.32.2 transformers==4.47.1
+# transformers 4.47.x has model config issues — 4.40.1 is the tested working version
+# diffusers 0.33.0 tested and working with HunyuanVideo-Avatar
+pip install diffusers==0.33.0 transformers==4.40.1
+
+# Additional runtime dependencies for HunyuanVideo-Avatar pipeline
+# accelerate: required by diffusers for model loading/offloading
+# imageio: required for video frame I/O in pipeline
+# opencv-python-headless: required for image processing (cv2) — headless = no GUI deps
+pip install accelerate imageio opencv-python-headless
 
 # Install ninja (speeds up flash-attn compilation from 30min to 10-15min)
 pip install ninja
@@ -227,7 +235,7 @@ pip install ninja
 pip install huggingface_hub
 
 # --- Install flash-attn (required by HunyuanVideo-Avatar) ---
-echo "[7/13] Installing flash-attn (this takes 10-30 minutes to compile)..."
+echo "[7/12] Installing flash-attn (this takes 10-30 minutes to compile)..."
 echo "  NOTE: 2x 'cicc' processes will appear at 100% CPU each, using ~7GB RAM each."
 echo "  This is NORMAL. Do not interrupt."
 if [ -n "${CUDA_HOME:-}" ]; then
@@ -258,7 +266,7 @@ echo "Cleaning pip cache..."
 pip cache purge
 
 # --- Install FishAudio fish-speech (TTS / Voice Clone) ---
-echo "[8/13] Installing FishAudio fish-speech..."
+echo "[8/12] Installing FishAudio fish-speech..."
 FISH_DIR="$DATA_DIR/models/fish-audio"
 if [ ! -d "$FISH_DIR/fish-speech" ]; then
     cd "$FISH_DIR"
@@ -287,7 +295,7 @@ except Exception as e:
 "
 
 # --- Install HunyuanVideo-Avatar ---
-echo "[9/13] Installing HunyuanVideo-Avatar..."
+echo "[9/12] Installing HunyuanVideo-Avatar..."
 HUNYUAN_INSTALL="/root/HunyuanVideo-Avatar"
 if [ ! -d "$HUNYUAN_INSTALL" ]; then
     git clone https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar.git "$HUNYUAN_INSTALL"
@@ -300,7 +308,7 @@ else
 fi
 
 # --- Download HunyuanVideo-Avatar model weights ---
-echo "[10/13] Downloading HunyuanVideo-Avatar weights (~76GB — this takes 30-60 min)..."
+echo "[10/12] Downloading HunyuanVideo-Avatar weights (~76GB — this takes 30-60 min)..."
 cd "$HUNYUAN_INSTALL"
 python3 -c "
 from huggingface_hub import snapshot_download
@@ -329,7 +337,7 @@ du -sh /root/avatar-data/ 2>/dev/null || true
 du -sh /usr/local/lib/python3.10/dist-packages/ 2>/dev/null || true
 
 # --- Environment file ---
-echo "[11/13] Setting up environment..."
+echo "[11/12] Setting up environment..."
 ENV_FILE="$PROJECT_DIR/worker/.env"
 if [ ! -f "$ENV_FILE" ]; then
     RANDOM_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -341,8 +349,6 @@ FISH_MODEL_PATH=/root/avatar-data/models/fish-audio
 PHOTOS_PATH=/root/avatar-data/photos
 VOICE_PATH=/root/avatar-data/voice
 OUTPUT_PATH=/root/avatar-data/outputs
-NGROK_AUTHTOKEN=
-NGROK_DOMAIN=
 ENVEOF
     echo "Created .env file at $ENV_FILE"
     echo "  WORKER_TOKEN=$RANDOM_TOKEN"
@@ -352,7 +358,7 @@ else
 fi
 
 # --- Systemd services ---
-echo "[12/13] Setting up systemd services..."
+echo "[12/12] Setting up systemd service..."
 
 # Worker service (no venv — using system Python)
 cat > /etc/systemd/system/avatar-worker.service << EOF
@@ -374,56 +380,15 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-# Install ngrok
-if ! command -v ngrok &> /dev/null; then
-    curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-        | tee /etc/apt/trusted.gpg.d/ngrok.asc > /dev/null
-    echo "deb https://ngrok-agent.s3.amazonaws.com buster main" \
-        | tee /etc/apt/sources.list.d/ngrok.list
-    apt-get update -qq
-    apt-get install -y -qq ngrok
-    # Clean apt cache after ngrok install
-    apt-get clean
-fi
-
-# Configure ngrok authtoken (CRITICAL: ngrok CLI reads from ~/.config/ngrok/ngrok.yml,
-# NOT from environment variables. The EnvironmentFile in systemd is not enough.)
-if [ -f "$ENV_FILE" ]; then
-    NGROK_TOKEN=$(grep '^NGROK_AUTHTOKEN=' "$ENV_FILE" | cut -d= -f2)
-    if [ -n "$NGROK_TOKEN" ]; then
-        ngrok config add-authtoken "$NGROK_TOKEN"
-        echo "ngrok authtoken configured."
-    else
-        echo "WARNING: NGROK_AUTHTOKEN is empty in .env — ngrok will not work."
-        echo "  After filling it in, run: ngrok config add-authtoken YOUR_TOKEN"
-    fi
-fi
-
-# ngrok tunnel service
-cat > /etc/systemd/system/avatar-ngrok.service << EOF
-[Unit]
-Description=Avatar IA ngrok tunnel
-After=avatar-worker.service
-Requires=avatar-worker.service
-
-[Service]
-Type=simple
-User=root
-EnvironmentFile=$PROJECT_DIR/worker/.env
-ExecStart=/usr/local/bin/ngrok http 8000 --domain=\${NGROK_DOMAIN} --log=stdout
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
+# NOTE: ngrok is NO LONGER NEEDED — using Docker instances with direct port mapping.
+# The frontend auto-detects the worker URL via Vast.ai API (IP:port).
+# ngrok install and service removed (was source of recurring bugs).
 
 systemctl daemon-reload
 systemctl enable avatar-worker
-systemctl enable avatar-ngrok
 
 # --- Final verification ---
-echo "[13/13] Final verification..."
+echo "Final verification..."
 echo ""
 echo "Installed versions:"
 echo "  Python:       $(python3 --version 2>&1)"
@@ -437,8 +402,10 @@ echo "  transformers: $(python3 -c 'import transformers; print(transformers.__ve
 echo "  soundfile:    $(python3 -c 'import soundfile; print(soundfile.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
 echo "  fastapi:      $(python3 -c 'import fastapi; print(fastapi.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
 echo "  uvicorn:      $(uvicorn --version 2>&1 || echo 'NOT INSTALLED')"
+echo "  accelerate:   $(python3 -c 'import accelerate; print(accelerate.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  imageio:      $(python3 -c 'import imageio; print(imageio.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  cv2:          $(python3 -c 'import cv2; print(cv2.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
 echo "  ffmpeg:       $(ffmpeg -version 2>&1 | head -1 || echo 'NOT INSTALLED')"
-echo "  ngrok:        $(ngrok version 2>&1 || echo 'NOT INSTALLED')"
 echo "  nvcc:         $(nvcc --version 2>&1 | tail -1 || echo 'NOT INSTALLED')"
 if command -v nvidia-smi &> /dev/null; then
     echo "  GPU:          $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'unknown')"
@@ -462,45 +429,36 @@ echo "  2. Add voice sample to:     $DATA_DIR/voice/"
 echo "     (10-30s .wav of Benjamin speaking clearly)"
 echo "  3. Note your WORKER_TOKEN from above — add it to Vercel env vars"
 echo ""
-echo "  4. Configure ngrok (one-time setup):"
-echo "     a. Create free account at https://ngrok.com"
-echo "     b. Dashboard > Your Authtoken > copy token"
-echo "     c. Dashboard > Domains > 'New Domain' (free, 1 per account)"
-echo "     d. Edit .env:  nano $ENV_FILE"
-echo "        NGROK_AUTHTOKEN=your_token_here"
-echo "        NGROK_DOMAIN=your-domain.ngrok-free.app"
-echo "     e. Run: ngrok config add-authtoken YOUR_TOKEN"
-echo ""
-echo "  5. Start services:"
+echo "  4. Start worker:"
 echo "     systemctl start avatar-worker"
-echo "     systemctl start avatar-ngrok"
 echo ""
-echo "  6. Check logs:"
+echo "  5. Check logs:"
 echo "     journalctl -u avatar-worker -f"
-echo "     journalctl -u avatar-ngrok -f"
 echo ""
-echo "  7. Test health:"
+echo "  6. Test health:"
 echo "     curl http://localhost:8000/health"
-echo "     curl -H 'ngrok-skip-browser-warning: true' https://YOUR-DOMAIN.ngrok-free.app/health"
 echo ""
-echo "  8. In Vercel, set GPU_WORKER_URL=https://YOUR-DOMAIN.ngrok-free.app"
-echo "     (this URL never changes with a static domain — set it once)"
+echo "  7. In Vercel, set:"
+echo "     GPU_WORKER_TOKEN=<your token from step 3>"
+echo "     VAST_INSTANCE_ID=<your Vast.ai instance ID>"
+echo "     (Worker URL auto-detected via Vast.ai API — no manual URL needed)"
 echo ""
 echo "Monitoring:"
-echo "  watch -n 2 nvidia-smi              # GPU monitoring"
+echo "  watch -n 2 nvidia-smi              # GPU (VRAM, utilisation)"
 echo "  journalctl -u avatar-worker -f     # Worker logs"
 echo "  htop                               # CPU/RAM"
 echo "  df -h /                            # Disk space"
+echo "  free -h                            # RAM + Swap"
 echo ""
 echo "Troubleshooting:"
 echo "  - OOM kill?     → Check: free -h (swap active?), consider VM with 32GB+ RAM"
 echo "  - Disk full?    → Run: apt-get clean && pip cache purge && du -sh /root/* | sort -rh"
 echo "  - flash-attn?   → Check: nvcc --version && echo \$CUDA_HOME"
 echo "  - No nvcc?      → Run: apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1"
-echo "  - ngrok error?  → Check disk space (df -h /), restart: systemctl restart avatar-ngrok"
 echo "  - Worker crash?  → Check: journalctl -u avatar-worker -n 50"
 echo "  - torchvision?  → pip install torchvision (required by HunyuanVideo-Avatar)"
 echo "  - Verify GPU:    nvidia-smi"
+echo "  - CUDA OOM?     → Already using --cpu-offload --use-fp8 --infer-min (peak ~17GB)"
 echo ""
 echo "IMPORTANT NOTES:"
 echo "  - Use a Vast.ai template with CUDA toolkit (devel image) for flash-attn"

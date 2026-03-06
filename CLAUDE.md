@@ -300,16 +300,13 @@ R2_BUCKET=avatar-videos
 ### worker/.env
 
 ```
-WORKER_TOKEN=
+WORKER_TOKEN=                                   # Token d'auth (généré par setup.sh)
 HUNYUAN_MODEL_PATH=/root/avatar-data/models/hunyuan
 HUNYUAN_INSTALL_PATH=/root/HunyuanVideo-Avatar
 FISH_MODEL_PATH=/root/avatar-data/models/fish-audio
 PHOTOS_PATH=/root/avatar-data/photos
 VOICE_PATH=/root/avatar-data/voice
 OUTPUT_PATH=/root/avatar-data/outputs
-# ngrok (OBSOLÈTE — conservé pour référence, plus nécessaire avec instance Docker)
-# NGROK_AUTHTOKEN=
-# NGROK_DOMAIN=
 ```
 
 ## Règles importantes
@@ -347,8 +344,11 @@ OUTPUT_PATH=/root/avatar-data/outputs
   - Repo : https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar
   - Installé dans `/root/HunyuanVideo-Avatar/` sur la VM
   - Exécuté en subprocess via `hymm_sp/sample_gpu_poor.py` avec CSV en entrée
-  - Args clés : `--cpu-offload --use-fp8 --infer-min --sample-n-frames 129 --image-size 704`
-  - Min VRAM : 10GB (avec TeaCache), recommandé 24GB+ (RTX 3090 = 24GB, suffisant avec cpu-offload)
+  - Args clés : `--cpu-offload --use-fp8 --infer-min --sample-n-frames 129 --image-size 704 --infer-steps 30`
+  - Peak VRAM : ~17GB avec cpu-offload + FP8 (RTX 3090 24GB = suffisant)
+  - Temps génération : ~75 min (30 steps) ou ~2h30 (50 steps) par vidéo de 5.2s
+  - `--use-deepcache 1` : le flag existe dans config mais n'est PAS implémenté dans le code d'inférence
+  - TeaCache/Wan2GP : non intégré (Wan2GP est une app Gradio, pas un CLI drop-in)
 - **FishAudio OpenAudio S1-mini** : TTS Python, prend texte + audio ref → génère wav
   - Repo : https://github.com/fishaudio/fish-speech
   - Modèle : `openaudio-s1-mini` (téléchargé via HuggingFace dans `/root/avatar-data/models/fish-audio/openaudio-s1-mini/`)
@@ -363,7 +363,7 @@ OUTPUT_PATH=/root/avatar-data/outputs
   if not hasattr(torchaudio, "list_audio_backends"):
       torchaudio.list_audio_backends = lambda: ["soundfile"]
   ```
-- **diffusers / transformers** : les versions récentes de `transformers` (>= 5.x) suppriment `FLAX_WEIGHTS_NAME` que `diffusers` importe. Pinner à `diffusers==0.32.2` + `transformers==4.47.1`.
+- **diffusers / transformers** : les versions récentes de `transformers` (>= 5.x) suppriment `FLAX_WEIGHTS_NAME` que `diffusers` importe. Pinner à `diffusers==0.33.0` + `transformers==4.40.1` (versions testées et fonctionnelles). Note : transformers 4.47.1 a des problèmes de config modèle avec HunyuanVideo-Avatar, utiliser 4.40.1.
 - **flash-attn** : requis par HunyuanVideo-Avatar (`flash_attn.flash_attn_interface`). Options d'installation (dans l'ordre) :
   1. **Wheels précompilés** (rapide) : `pip install flash-attn` — fonctionne si un wheel correspond à votre combo Python/CUDA/torch
   2. **Compilation** (5-15 min) : nécessite `CUDA_HOME` + `nvcc`. Utiliser un template Vast.ai "devel" avec CUDA toolkit, ou installer manuellement : `apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1`
@@ -461,16 +461,19 @@ OUTPUT_PATH=/root/avatar-data/outputs
 Versions testées et fonctionnelles :
 
 ```
-torch>=2.1 (avec CUDA, ex: cu121 ou cu128)
-torchvision>=0.16 (requis par HunyuanVideo-Avatar)
-torchaudio>=2.1
+torch==2.5.1+cu121 (avec CUDA)
+torchvision==0.20.1+cu121 (requis par HunyuanVideo-Avatar)
+torchaudio==2.5.1+cu121
 torchcodec>=0.10
-diffusers==0.32.2
-transformers==4.47.1
-flash-attn>=2.5 (compilé avec nvcc, ou wheel précompilé)
+diffusers==0.33.0
+transformers==4.40.1 (CRITIQUE — 4.47.1 casse les configs modèle)
+flash-attn==2.8.3 (compilé avec nvcc, ou wheel précompilé)
+accelerate==1.1.1 (requis par diffusers pour model loading/offloading)
+imageio==2.34.0 (requis pour video frame I/O)
+opencv-python-headless==4.10.0.84 (requis pour image processing cv2)
 ninja (accélère la compilation flash-attn)
-fish-speech (pip install -e . depuis le clone)
-soundfile
+fish-speech==0.1.0 (pip install -e . depuis le clone)
+soundfile==0.13.1
 huggingface_hub (pour téléchargement des poids modèle)
 ```
 
@@ -623,7 +626,7 @@ typescript@^5
 
 ## Statut actuel (mars 2026)
 
-### Ce qui fonctionne
+### Ce qui fonctionne ✅
 - Auth (login/logout)
 - Dashboard GPU (start/stop VM, billing, statut)
 - Génération photos Astria (avec persistence localStorage)
@@ -632,13 +635,38 @@ typescript@^5
 - Job tracking cross-pages (bannière globale `active-job-banner.tsx`)
 - Auto-stop VM (cron daily)
 - Auto-detect URL Worker via Vast.ai API (remplace ngrok)
+- **Pipeline TTS** : FishAudio OpenAudio S1-mini → WAV (testé, ~38s pour une phrase courte)
+- **Pipeline HunyuanVideo-Avatar** : photo + WAV → MP4 (testé, 129 frames/704px/30 steps, ~17GB VRAM peak)
+- **VRAM management** : TTS unload avant HunyuanVideo (libère ~18GB), puis cpu-offload pour inférence
+- **Background composite** : graceful fallback si le téléchargement du décor échoue (pas de crash)
 
-### Ce qui reste à tester/finaliser
-- **Pipeline end-to-end** : photo → TTS → HunyuanVideo → MP4 (jamais testé complètement)
-- **Git pull sur VM** : les derniers fixes doivent être pull + restart worker après chaque push
+### Ce qui reste à faire
+- **Test end-to-end complet via frontend** : TTS → HunyuanVideo → composite → MP4 servi au browser
+- **Qualité vidéo** : valider le rendu des vidéos 129 frames / 704px (5.2s à 25fps)
 - **Export Canva** : intégration OAuth en place mais pas testée end-to-end
-- **Auto-detect Vast.ai** : implémenter dans `gpu-api.ts` la résolution dynamique d'URL via Vast.ai API
-- **Nettoyage ngrok** : supprimer les refs ngrok dans `setup.sh`, `config.py`, le service systemd `avatar-ngrok`
+- **Optimisation vitesse** : ~75 min par vidéo de 5.2s est lent. Options futures :
+  - TeaCache intégration directe dans le denoiser (potentiel 2x speedup)
+  - GPU 48GB+ (A6000 $0.37/h) pour enlever cpu-offload → ~10x plus rapide
+  - Réduire infer-steps à 20 (qualité moindre mais 2x plus rapide)
+
+### HunyuanVideo-Avatar : benchmarks RTX 3090 (24GB)
+
+Tests effectués le 6 mars 2026 sur instance Vast.ai 32454128 :
+
+| Config | Frames | Résolution | Steps | VRAM peak | Temps | Résultat |
+|--------|--------|-----------|-------|-----------|-------|----------|
+| Minimal | 33 | 384px | 25 | ~11 GB | ~5 min | OK — 220KB, 1.3s, basse qualité |
+| **Full quality** | **129** | **704px** | **50** | **~17 GB** | **~2h30** | **OK — stable, pas d'OOM** |
+| Production | 129 | 704px | 30 | ~17 GB | **~75 min** | Compromis retenu (code actuel) |
+
+Paramètres communs : `--cpu-offload --use-fp8 --infer-min --use-deepcache 1`
+
+Notes :
+- `--cpu-offload` : les poids du modèle (~30GB) restent en RAM CPU, transférés au GPU pendant le calcul
+- `--use-fp8` : poids transformer en FP8 (réduit VRAM de ~3GB)
+- `--infer-min` : mode inférence minimal (réduit les buffers)
+- `--use-deepcache 1` : flag présent dans le code mais **PAS implémenté** dans le loop de débruitage (n'a aucun effet)
+- La RAM système doit être >= 32GB pour le cpu-offload (35GB utilisés en pic)
 
 ### Historique ngrok (référence si besoin de rollback)
 
@@ -648,6 +676,21 @@ L'ancien système utilisait ngrok Cloud Endpoint pour exposer le port 8000 de la
 - Config : `NGROK_AUTHTOKEN` + `NGROK_DOMAIN` dans `.env`
 - Problèmes rencontrés : interstitiel HTML sur POST multipart, ERR_NGROK_4018 (authtoken), ERR_NGROK_8012 (bad gateway), disque plein cassait ngrok
 - Raison de l'abandon : trop fragile, source de bugs récurrents, instance Docker avec port direct = plus simple
+
+## Bugs résolus (session mars 2026)
+
+### Pipeline / Worker
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| Background download crash (403 Forbidden) | Pexels URL retourne 403 sans User-Agent | Wrappé dans try/except + User-Agent header + skip gracieux |
+| Vidéo 220KB (1.3s seulement) | Settings minimaux 33 frames/384px | Upgrade à 129/704/30 (full quality, stable sur RTX 3090) |
+| `transformers` config error | Version 4.47.1 incompatible | Downgrade à 4.40.1 (version matching model config) |
+| Missing `imageio` module | Pas installé par défaut | Ajouté dans setup.sh |
+| Missing `cv2` module | opencv pas installé | Ajouté `opencv-python-headless` dans setup.sh |
+| Missing `accelerate` module | Pas installé | Ajouté dans setup.sh |
+| TTS VRAM conflict avec HunyuanVideo | Les deux modèles ensemble dépassent 24GB | `tts_engine.unload_model()` entre Step 1 et Step 2 |
+| SSH "Connection refused" sur ssh8.vast.ai | Hostname résolu incorrectement | Utiliser IP directe : `ssh -p 28136 root@182.64.125.233` |
 
 ## Préférences utilisateur
 
