@@ -99,11 +99,19 @@ async def run_pipeline(job_id: str) -> None:
             # Download background and composite
             composited_path = os.path.join(output_dir, "composited.mp4")
             bg_path = os.path.join(output_dir, "background.jpg")
-            # Download background image
-            import urllib.request
-            urllib.request.urlretrieve(background_url, bg_path)
-            await composite_background(raw_video_path, bg_path, composited_path)
-            raw_video_path = composited_path
+            try:
+                import urllib.request
+                req = urllib.request.Request(
+                    background_url,
+                    headers={"User-Agent": "AvatarIA-Worker/1.0"},
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp, open(bg_path, "wb") as f:
+                    f.write(resp.read())
+                await composite_background(raw_video_path, bg_path, composited_path)
+                raw_video_path = composited_path
+            except Exception as bg_err:
+                logger.warning("[%s] Background download failed (%s), skipping composite",
+                               job_id, bg_err)
 
         final_path = await normalize_video(
             input_path=raw_video_path,
