@@ -356,6 +356,8 @@ NGROK_DOMAIN=
   - Si les wheels précompilés échouent avec "inconsistent version", c'est un bug pip connu → passer à la compilation
 - **torchvision** : requis par HunyuanVideo-Avatar (`hymm_sp/data_kits/audio_dataset.py` l'importe). Installé avec PyTorch : `pip install torch torchvision torchaudio`.
 - **torchcodec** : requis par torchaudio au runtime. Installer avec `pip install torchcodec`.
+- **pydantic-settings / config.py** : `BaseSettings` lit toutes les variables du `.env`. Si une variable existe dans `.env` mais pas dans la classe `Settings`, pydantic lève `extra_forbidden`. **Toute nouvelle variable ajoutée au `.env` doit être déclarée dans `worker/config.py`** avec une valeur par défaut (ex: `ngrok_authtoken: str = ""`).
+- **ngrok authtoken** : le service systemd passe `NGROK_AUTHTOKEN` via `EnvironmentFile`, mais **ngrok CLI lit son authtoken depuis `~/.config/ngrok/ngrok.yml`**, PAS depuis les variables d'environnement. Il faut impérativement exécuter `ngrok config add-authtoken TOKEN` une fois. Le `setup.sh` le fait automatiquement si `NGROK_AUTHTOKEN` est rempli dans le `.env`.
 - **NextAuth v5** : utilise `AUTH_SECRET` comme nom de variable principal, mais `NEXTAUTH_SECRET` fonctionne aussi (voir `lib/env.ts`).
 
 ## Architecture VM (Vast.ai)
@@ -521,6 +523,9 @@ pip cache purge  # libérer le cache pip
 | flash-attn compilation 30min+ | Normal avec nvcc | Attendre — 2x `cicc` à 100% CPU est normal |
 | `list_audio_backends` error | torchaudio >= 2.1 | Monkey-patch dans main.py/tts.py (déjà fait) |
 | `FLAX_WEIGHTS_NAME` error | transformers trop récent | `pip install diffusers==0.32.2 transformers==4.47.1` |
+| ngrok `ERR_NGROK_4018` (authtoken) | `ngrok config add-authtoken` jamais exécuté | `ngrok config add-authtoken VOTRE_TOKEN` (ngrok lit `~/.config/ngrok/ngrok.yml`, PAS les env vars) |
+| pydantic `extra_forbidden` au démarrage worker | `.env` contient des vars pas dans `config.py` Settings | Ajouter les champs manquants dans `worker/config.py` (ex: `ngrok_authtoken: str = ""`) |
+| ngrok `ERR_NGROK_8012` (Bad Gateway) | Worker pas encore prêt après restart | Attendre 10s après `systemctl restart avatar-worker` avant de tester |
 
 ### Commandes de monitoring utiles
 
