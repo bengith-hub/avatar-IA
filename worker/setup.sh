@@ -3,18 +3,74 @@
 # Usage: ssh into VM, then: bash setup.sh
 # Tested on Ubuntu 22.04 + NVIDIA GPU (RTX 3090/4090 24GB, A100)
 #
-# IMPORTANT: Choose a Vast.ai template with CUDA toolkit included (e.g. "pytorch/pytorch:*-devel")
-# or one that already has nvcc. This is required for compiling flash-attn.
-# Verify with: nvcc --version
+# =====================================================================
+#   VAST.AI VM REQUIREMENTS (CRITICAL — READ BEFORE CHOOSING A VM)
+# =====================================================================
+#
+#   GPU:    RTX 3090/4090 (24GB VRAM) minimum, A100 recommended
+#   RAM:    32GB+ (25GB causera des OOM kills avec --cpu-offload)
+#   Disk:   200GB+ minimum (poids modèle ~76GB + libs ~20GB + OS ~10GB + swap)
+#           *** 126GB est TROP JUSTE — on a eu des problèmes de disque plein ***
+#   Image:  DEVEL template (avec CUDA toolkit / nvcc) — PAS "runtime"
+#           Ex: pytorch/pytorch:2.1.0-cuda12.1-cudnn8-devel
+#           Vérifier avec: nvcc --version
+#   Python: 3.10 (système)
+#
+# Temps d'installation estimé:
+#   - Dépendances système + pip: ~10 min
+#   - flash-attn compilation: 10-30 min (2 CPU à 100%, ~7GB RAM chacun)
+#   - Téléchargement poids HunyuanVideo: ~30-60 min (~76GB)
+#   - Téléchargement poids OpenAudio S1-mini: ~5 min (~2GB)
+#   - TOTAL: ~1h-2h
+#
+# =====================================================================
 
 set -euo pipefail
 
 echo "========================================="
 echo "  Avatar IA Worker — VM Setup"
 echo "========================================="
+echo ""
+
+# --- Pre-flight checks ---
+echo "[0/13] Pre-flight checks..."
+
+# Check disk space
+DISK_AVAIL_GB=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+echo "Disk available: ${DISK_AVAIL_GB}GB"
+if [ "$DISK_AVAIL_GB" -lt 100 ]; then
+    echo "WARNING: Only ${DISK_AVAIL_GB}GB available. Recommended: 150GB+ free."
+    echo "HunyuanVideo weights alone need ~76GB. Consider a larger disk."
+    read -p "Continue anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Aborted. Choose a VM with more disk space."
+        exit 1
+    fi
+fi
+
+# Check RAM
+RAM_TOTAL_MB=$(free -m | awk '/^Mem:/ {print $2}')
+echo "RAM total: ${RAM_TOTAL_MB}MB"
+if [ "$RAM_TOTAL_MB" -lt 28000 ]; then
+    echo "WARNING: Only ${RAM_TOTAL_MB}MB RAM. Recommended: 32GB+."
+    echo "With 25GB RAM, HunyuanVideo + cpu-offload WILL cause OOM kills."
+    echo "A swap file will be created to mitigate this."
+fi
+
+# Check GPU
+if command -v nvidia-smi &> /dev/null; then
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "unknown")
+    GPU_MEM=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader 2>/dev/null | head -1 || echo "unknown")
+    echo "GPU: $GPU_NAME ($GPU_MEM)"
+else
+    echo "WARNING: nvidia-smi not found. No GPU detected."
+fi
+
+echo ""
 
 # --- System packages ---
-echo "[1/12] Installing system packages..."
+echo "[1/13] Installing system packages..."
 apt-get update -qq
 apt-get install -y -qq \
     git git-lfs \
@@ -25,8 +81,13 @@ apt-get install -y -qq \
 # Init git-lfs (needed for model weight downloads)
 git lfs install
 
+# --- Clean apt cache immediately to save disk ---
+echo "Cleaning apt cache to save disk space..."
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+
 # --- Detect CUDA ---
-echo "[2/12] Detecting CUDA installation..."
+echo "[2/13] Detecting CUDA installation..."
 if [ -z "${CUDA_HOME:-}" ]; then
     # Try common locations (newest first)
     for cuda_dir in /usr/local/cuda /usr/local/cuda-12.8 /usr/local/cuda-12.6 \
@@ -61,6 +122,9 @@ if [ -z "${CUDA_HOME:-}" ]; then
         echo "ERROR: Could not install cuda-toolkit-12-1."
         echo "flash-attn compilation will fail. Install CUDA toolkit manually."
     }
+    # Clean apt cache again after CUDA toolkit install (saves ~5GB)
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
     if [ -d "/usr/local/cuda-12.1" ]; then
         export CUDA_HOME="/usr/local/cuda-12.1"
     fi
@@ -76,13 +140,39 @@ else
     echo "You can set it manually: export CUDA_HOME=/path/to/cuda"
 fi
 
+# --- Swap file (prevents OOM kills during generation) ---
+echo "[3/13] Setting up swap file..."
+if [ ! -f /swapfile ]; then
+    # Use 4GB swap — enough to prevent OOM, not too much disk
+    # (flash-attn compilation uses ~14GB RAM with 2 cicc processes)
+    # (HunyuanVideo --cpu-offload can use 20-30GB RAM)
+    SWAP_SIZE="4G"
+    if [ "$RAM_TOTAL_MB" -lt 28000 ]; then
+        SWAP_SIZE="8G"
+        echo "RAM < 28GB, using 8GB swap to compensate."
+    fi
+    fallocate -l "$SWAP_SIZE" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1G count=${SWAP_SIZE%G}
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    # Persist across reboots
+    if ! grep -q '/swapfile' /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+    echo "Swap configured: $SWAP_SIZE"
+else
+    echo "Swap file already exists."
+    swapon /swapfile 2>/dev/null || true
+fi
+free -h | grep -i swap
+
 # --- Data directories ---
-echo "[3/12] Creating data directories..."
+echo "[4/13] Creating data directories..."
 DATA_DIR="/root/avatar-data"
 mkdir -p "$DATA_DIR"/{models/hunyuan,models/fish-audio,photos,voice,outputs}
 
 # --- Clone project ---
-echo "[4/12] Cloning project repository..."
+echo "[5/13] Cloning project repository..."
 PROJECT_DIR="/root/avatar-IA"
 if [ -d "$PROJECT_DIR" ]; then
     cd "$PROJECT_DIR" && git pull origin main
@@ -91,7 +181,7 @@ else
 fi
 
 # --- Python dependencies (system-wide, no venv) ---
-echo "[5/12] Installing Python dependencies..."
+echo "[6/13] Installing Python dependencies..."
 cd "$PROJECT_DIR/worker"
 pip install --upgrade pip setuptools wheel
 
@@ -102,36 +192,49 @@ if [ -n "${CUDA_HOME:-}" ]; then
     CUDA_VERSION=$(${CUDA_HOME}/bin/nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//' || echo "")
 fi
 
+echo "Detected CUDA version: ${CUDA_VERSION:-unknown}"
+
+# PyTorch + torchvision + torchaudio (all three required)
+# torchvision: required by HunyuanVideo-Avatar (hymm_sp/data_kits/audio_dataset.py imports it)
+# torchaudio: required by fish-speech TTS
 if [[ "$CUDA_VERSION" == 12.8* ]] || [[ "$CUDA_VERSION" == 12.6* ]] || [[ "$CUDA_VERSION" == 12.4* ]]; then
-    echo "Detected CUDA $CUDA_VERSION — installing PyTorch with cu124..."
+    echo "Installing PyTorch with cu124..."
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 elif [[ "$CUDA_VERSION" == 12.1* ]] || [[ "$CUDA_VERSION" == 12.2* ]]; then
-    echo "Detected CUDA $CUDA_VERSION — installing PyTorch with cu121..."
+    echo "Installing PyTorch with cu121..."
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 else
-    echo "CUDA version: ${CUDA_VERSION:-unknown} — defaulting to cu121..."
+    echo "CUDA version unknown — defaulting to cu121..."
     pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 fi
 
-# Install worker dependencies
+# Install worker dependencies (FastAPI, uvicorn, pydantic, etc.)
 pip install -r requirements.txt
 
 # Additional runtime dependencies
+# torchcodec: required by torchaudio at runtime
+# soundfile: required for audio file I/O
 pip install torchcodec soundfile
 
-# Pin diffusers/transformers versions (newer versions have breaking import changes)
+# Pin diffusers/transformers versions (CRITICAL — newer versions break imports)
 # transformers >= 5.x removes FLAX_WEIGHTS_NAME that diffusers imports
 pip install diffusers==0.32.2 transformers==4.47.1
 
-# Install ninja (speeds up flash-attn compilation significantly)
+# Install ninja (speeds up flash-attn compilation from 30min to 10-15min)
 pip install ninja
 
+# Install huggingface_hub (for model weight downloads)
+pip install huggingface_hub
+
 # --- Install flash-attn (required by HunyuanVideo-Avatar) ---
-echo "[6/12] Installing flash-attn (this takes 5-15 minutes to compile)..."
+echo "[7/13] Installing flash-attn (this takes 10-30 minutes to compile)..."
+echo "  NOTE: 2x 'cicc' processes will appear at 100% CPU each, using ~7GB RAM each."
+echo "  This is NORMAL. Do not interrupt."
 if [ -n "${CUDA_HOME:-}" ]; then
     # Try prebuilt wheel first (fast, seconds)
     pip install flash-attn 2>/dev/null || {
         echo "Prebuilt wheel not available, compiling from source..."
+        echo "This will take 10-30 minutes. Go get a coffee."
         pip install flash-attn --no-build-isolation || {
             echo "WARNING: flash-attn compilation failed."
             echo "ERROR: flash-attn could not be installed. HunyuanVideo-Avatar will not work."
@@ -150,12 +253,12 @@ else
     echo "  3. pip install flash-attn --no-build-isolation"
 fi
 
-# --- Install huggingface_hub (for model downloads) ---
-echo "[7/12] Installing huggingface_hub..."
-pip install huggingface_hub
+# --- Clean pip cache after heavy installs (saves 1-5GB) ---
+echo "Cleaning pip cache..."
+pip cache purge
 
 # --- Install FishAudio fish-speech (TTS / Voice Clone) ---
-echo "[8/12] Installing FishAudio fish-speech..."
+echo "[8/13] Installing FishAudio fish-speech..."
 FISH_DIR="$DATA_DIR/models/fish-audio"
 if [ ! -d "$FISH_DIR/fish-speech" ]; then
     cd "$FISH_DIR"
@@ -169,8 +272,8 @@ else
     pip install -e .
 fi
 
-# Download OpenAudio S1-mini model weights
-echo "Downloading OpenAudio S1-mini model weights..."
+# Download OpenAudio S1-mini model weights (~2GB)
+echo "Downloading OpenAudio S1-mini model weights (~2GB)..."
 python3 -c "
 from huggingface_hub import snapshot_download
 try:
@@ -184,7 +287,7 @@ except Exception as e:
 "
 
 # --- Install HunyuanVideo-Avatar ---
-echo "[9/12] Installing HunyuanVideo-Avatar..."
+echo "[9/13] Installing HunyuanVideo-Avatar..."
 HUNYUAN_INSTALL="/root/HunyuanVideo-Avatar"
 if [ ! -d "$HUNYUAN_INSTALL" ]; then
     git clone https://github.com/Tencent-Hunyuan/HunyuanVideo-Avatar.git "$HUNYUAN_INSTALL"
@@ -197,7 +300,7 @@ else
 fi
 
 # --- Download HunyuanVideo-Avatar model weights ---
-echo "[10/12] Downloading HunyuanVideo-Avatar weights (this may take a while — ~76GB)..."
+echo "[10/13] Downloading HunyuanVideo-Avatar weights (~76GB — this takes 30-60 min)..."
 cd "$HUNYUAN_INSTALL"
 python3 -c "
 from huggingface_hub import snapshot_download
@@ -212,8 +315,21 @@ except Exception as e:
     print('Download manually: huggingface-cli download tencent/HunyuanVideo-Avatar --local-dir weights/')
 "
 
+# --- Clean pip cache again after all installs ---
+echo "Final pip cache cleanup..."
+pip cache purge
+
+# --- Verify disk space ---
+echo ""
+echo "Disk usage after install:"
+df -h /
+echo ""
+du -sh /root/HunyuanVideo-Avatar/ 2>/dev/null || true
+du -sh /root/avatar-data/ 2>/dev/null || true
+du -sh /usr/local/lib/python3.10/dist-packages/ 2>/dev/null || true
+
 # --- Environment file ---
-echo "[11/12] Setting up environment..."
+echo "[11/13] Setting up environment..."
 ENV_FILE="$PROJECT_DIR/worker/.env"
 if [ ! -f "$ENV_FILE" ]; then
     RANDOM_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
@@ -236,7 +352,7 @@ else
 fi
 
 # --- Systemd services ---
-echo "[12/12] Setting up systemd services..."
+echo "[12/13] Setting up systemd services..."
 
 # Worker service (no venv — using system Python)
 cat > /etc/systemd/system/avatar-worker.service << EOF
@@ -266,6 +382,8 @@ if ! command -v ngrok &> /dev/null; then
         | tee /etc/apt/sources.list.d/ngrok.list
     apt-get update -qq
     apt-get install -y -qq ngrok
+    # Clean apt cache after ngrok install
+    apt-get clean
 fi
 
 # ngrok tunnel service
@@ -291,7 +409,35 @@ systemctl daemon-reload
 systemctl enable avatar-worker
 systemctl enable avatar-ngrok
 
+# --- Final verification ---
+echo "[13/13] Final verification..."
 echo ""
+echo "Installed versions:"
+echo "  Python:       $(python3 --version 2>&1)"
+echo "  torch:        $(python3 -c 'import torch; print(torch.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  torchvision:  $(python3 -c 'import torchvision; print(torchvision.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  torchaudio:   $(python3 -c 'import torchaudio; print(torchaudio.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  torchcodec:   $(python3 -c 'import torchcodec; print(torchcodec.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  flash-attn:   $(python3 -c 'import flash_attn; print(flash_attn.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  diffusers:    $(python3 -c 'import diffusers; print(diffusers.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  transformers: $(python3 -c 'import transformers; print(transformers.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  soundfile:    $(python3 -c 'import soundfile; print(soundfile.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  fastapi:      $(python3 -c 'import fastapi; print(fastapi.__version__)' 2>/dev/null || echo 'NOT INSTALLED')"
+echo "  uvicorn:      $(uvicorn --version 2>&1 || echo 'NOT INSTALLED')"
+echo "  ffmpeg:       $(ffmpeg -version 2>&1 | head -1 || echo 'NOT INSTALLED')"
+echo "  ngrok:        $(ngrok version 2>&1 || echo 'NOT INSTALLED')"
+echo "  nvcc:         $(nvcc --version 2>&1 | tail -1 || echo 'NOT INSTALLED')"
+if command -v nvidia-smi &> /dev/null; then
+    echo "  GPU:          $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'unknown')"
+fi
+echo ""
+echo "Disk:"
+df -h /
+echo ""
+echo "RAM + Swap:"
+free -h
+echo ""
+
 echo "========================================="
 echo "  Setup complete!"
 echo "========================================="
@@ -322,18 +468,31 @@ echo "     journalctl -u avatar-ngrok -f"
 echo ""
 echo "  7. Test health:"
 echo "     curl http://localhost:8000/health"
-echo "     curl https://YOUR-DOMAIN.ngrok-free.app/health"
+echo "     curl -H 'ngrok-skip-browser-warning: true' https://YOUR-DOMAIN.ngrok-free.app/health"
 echo ""
 echo "  8. In Vercel, set GPU_WORKER_URL=https://YOUR-DOMAIN.ngrok-free.app"
-echo "     (this URL never changes — set it once)"
+echo "     (this URL never changes with a static domain — set it once)"
+echo ""
+echo "Monitoring:"
+echo "  watch -n 2 nvidia-smi              # GPU monitoring"
+echo "  journalctl -u avatar-worker -f     # Worker logs"
+echo "  htop                               # CPU/RAM"
+echo "  df -h /                            # Disk space"
 echo ""
 echo "Troubleshooting:"
-echo "  - flash-attn failed? Check: nvcc --version && echo \$CUDA_HOME"
-echo "  - No nvcc? Run: apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1"
-echo "  - Then: pip install flash-attn --no-build-isolation"
-echo "  - Worker won't start? Check: journalctl -u avatar-worker -n 50"
-echo "  - Verify GPU: nvidia-smi"
+echo "  - OOM kill?     → Check: free -h (swap active?), consider VM with 32GB+ RAM"
+echo "  - Disk full?    → Run: apt-get clean && pip cache purge && du -sh /root/* | sort -rh"
+echo "  - flash-attn?   → Check: nvcc --version && echo \$CUDA_HOME"
+echo "  - No nvcc?      → Run: apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1"
+echo "  - ngrok error?  → Check disk space (df -h /), restart: systemctl restart avatar-ngrok"
+echo "  - Worker crash?  → Check: journalctl -u avatar-worker -n 50"
+echo "  - torchvision?  → pip install torchvision (required by HunyuanVideo-Avatar)"
+echo "  - Verify GPU:    nvidia-smi"
 echo ""
-echo "IMPORTANT: Use a Vast.ai template with CUDA toolkit (devel image)"
-echo "for flash-attn compilation. Check with: nvcc --version"
+echo "IMPORTANT NOTES:"
+echo "  - Use a Vast.ai template with CUDA toolkit (devel image) for flash-attn"
+echo "  - Minimum disk: 200GB (76GB weights + 20GB libs + OS + swap + headroom)"
+echo "  - Minimum RAM: 32GB recommended (25GB works with swap but risky)"
+echo "  - flash-attn compilation: 10-30 min, 2 CPU cores at 100%, ~14GB RAM"
+echo "  - apt-get clean after each apt install to save ~5GB disk"
 echo ""

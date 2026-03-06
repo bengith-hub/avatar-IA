@@ -354,12 +354,44 @@ NGROK_DOMAIN=
   2. **Compilation** (5-15 min) : nécessite `CUDA_HOME` + `nvcc`. Utiliser un template Vast.ai "devel" avec CUDA toolkit, ou installer manuellement : `apt install cuda-toolkit-12-1 && export CUDA_HOME=/usr/local/cuda-12.1`
   3. **Avec ninja** (accélère la compilation) : `pip install ninja && pip install flash-attn --no-build-isolation`
   - Si les wheels précompilés échouent avec "inconsistent version", c'est un bug pip connu → passer à la compilation
+- **torchvision** : requis par HunyuanVideo-Avatar (`hymm_sp/data_kits/audio_dataset.py` l'importe). Installé avec PyTorch : `pip install torch torchvision torchaudio`.
 - **torchcodec** : requis par torchaudio au runtime. Installer avec `pip install torchcodec`.
 - **NextAuth v5** : utilise `AUTH_SECRET` comme nom de variable principal, mais `NEXTAUTH_SECRET` fonctionne aussi (voir `lib/env.ts`).
 
 ## Architecture VM (Vast.ai)
 
-**IMPORTANT** : Choisir un template Vast.ai avec CUDA toolkit (image "devel", pas "runtime") pour pouvoir compiler flash-attn. Vérifier avec `nvcc --version`.
+### Exigences minimales VM (CRITIQUE)
+
+| Ressource | Minimum | Recommandé | Notes |
+|-----------|---------|------------|-------|
+| **GPU** | RTX 3090 (24GB) | RTX 4090 / A100 | VRAM 24GB+ avec `--cpu-offload --use-fp8` |
+| **RAM** | 25GB (avec swap) | **32GB+** | 25GB → OOM kills fréquents, swap obligatoire |
+| **Disque** | 150GB | **200GB+** | Poids modèle 76GB + libs 20GB + OS 10GB + swap 4-8GB |
+| **Image** | devel (avec nvcc) | `pytorch:*-cuda12.1-devel` | **PAS "runtime"** — nvcc requis pour compiler flash-attn |
+| **Python** | 3.10 | 3.10 | Système (pas de venv) |
+
+**IMPORTANT** : 126GB de disque est **TROP JUSTE** — on a eu des problèmes de disque plein (99%) qui cassent ngrok et empêchent les générations. Toujours prendre 200GB+.
+
+**Swap obligatoire si RAM < 32GB** : HunyuanVideo avec `--cpu-offload` peut utiliser 20-30GB de RAM. Sans swap, le process est tué par l'OOM killer.
+
+### Utilisation disque typique
+
+```
+~76GB   /root/HunyuanVideo-Avatar/     (poids modèle dans weights/)
+~5GB    /root/avatar-data/             (modèles fish-audio ~2GB + photos/voice/outputs)
+~9GB    /usr/local/lib/python3.10/dist-packages/  (torch, flash-attn, etc.)
+~8GB    /usr/lib/                      (CUDA toolkit, libs système)
+~5GB    /var/cache/                    (cache apt — NETTOYER avec apt-get clean)
+~4GB    /swapfile                      (swap si RAM < 32GB)
+= ~107GB total → besoin de 150GB+ avec marge
+```
+
+### flash-attn : temps de compilation
+
+- **10-30 minutes** de compilation (2 process `cicc` à 100% CPU, ~7GB RAM chacun)
+- Pendant la compilation, `top` montre 2x `cicc` à 100% CPU — c'est **normal**
+- Il peut y avoir **plusieurs passes** de compilation successives
+- Ne pas interrompre, ne pas paniquer si ça dure
 
 ```
 /root/
@@ -425,15 +457,40 @@ Les dépendances IA (torch, transformers, fish-speech, flash-attn...) sont insta
 
 ## Procédure setup nouvelle VM
 
+### Choix de la VM sur Vast.ai
+
+Filtres recommandés :
+- **GPU** : RTX 3090/4090 ou A100
+- **RAM** : 32GB+
+- **Disk** : 200GB+
+- **Image** : chercher "devel" ou "cuda" dans le template (nvcc inclus)
+
+### Installation (1h-2h total)
+
 1. Choisir template Vast.ai **avec CUDA toolkit** (image "devel") — vérifier avec `nvcc --version`
 2. SSH dans la VM
 3. `git clone https://github.com/bengith-hub/avatar-IA.git && cd avatar-IA/worker && bash setup.sh`
-4. Configurer `.env` (token, ngrok)
-5. Ajouter photos + voix dans `/root/avatar-data/`
-6. `ngrok config add-authtoken VOTRE_TOKEN`
-7. `systemctl start avatar-worker && systemctl start avatar-ngrok`
-
-Le script `setup.sh` gère tout : dépendances système, pip, clones repos IA, téléchargement poids (~76GB), services systemd, installation ngrok.
+4. Le script fait tout automatiquement :
+   - Installe les paquets système (ffmpeg, git-lfs, etc.)
+   - Détecte CUDA et installe le toolkit si absent
+   - Crée un swap file (4-8GB selon RAM)
+   - Installe PyTorch + torchvision + torchaudio (avec bon wheel CUDA)
+   - Installe les dépendances worker (FastAPI, pydantic, etc.)
+   - Compile flash-attn (10-30 min — ne pas interrompre !)
+   - Clone et installe fish-speech + télécharge poids S1-mini (~2GB)
+   - Clone HunyuanVideo-Avatar + télécharge poids (~76GB, 30-60 min)
+   - Crée `.env` avec un token aléatoire
+   - Configure les services systemd (worker + ngrok)
+   - Nettoie les caches pip/apt pour économiser le disque
+   - Affiche un résumé de toutes les versions installées
+5. Configurer `.env` : `nano /root/avatar-IA/worker/.env`
+   - Copier le `WORKER_TOKEN` généré (affiché dans la sortie du script)
+   - Ajouter `NGROK_AUTHTOKEN` et `NGROK_DOMAIN`
+6. Ajouter photos + voix dans `/root/avatar-data/`
+7. `ngrok config add-authtoken VOTRE_TOKEN`
+8. `systemctl start avatar-worker && systemctl start avatar-ngrok`
+9. Tester : `curl http://localhost:8000/health`
+10. Mettre à jour `GPU_WORKER_URL` et `GPU_WORKER_TOKEN` dans Vercel
 
 ### Si flash-attn échoue (pas de nvcc)
 
@@ -442,12 +499,39 @@ Le script `setup.sh` gère tout : dépendances système, pip, clones repos IA, t
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
 dpkg -i cuda-keyring_1.1-1_all.deb
 apt-get update && apt-get install -y cuda-toolkit-12-1
+apt-get clean  # IMPORTANT: libérer l'espace disque
 export CUDA_HOME=/usr/local/cuda-12.1
 export PATH=$CUDA_HOME/bin:$PATH
 
 # Puis installer flash-attn
 pip install ninja
 pip install flash-attn --no-build-isolation
+pip cache purge  # libérer le cache pip
+```
+
+### Problèmes connus et solutions
+
+| Problème | Cause | Solution |
+|----------|-------|----------|
+| OOM kill du worker | RAM insuffisante + cpu-offload | Ajouter swap : `fallocate -l 8G /swapfile && mkswap /swapfile && swapon /swapfile` |
+| Disque plein (99%) | Cache apt/pip + poids modèle | `apt-get clean && pip cache purge` — prochaine fois prendre 200GB+ |
+| Erreur ngrok "page d'erreur" | Disque plein OU URL changée | Vérifier `df -h /` puis `systemctl restart avatar-ngrok` |
+| `ModuleNotFoundError: torchvision` | Pas installé | `pip install torchvision` |
+| `ModuleNotFoundError: torchcodec` | Pas installé | `pip install torchcodec` |
+| flash-attn compilation 30min+ | Normal avec nvcc | Attendre — 2x `cicc` à 100% CPU est normal |
+| `list_audio_backends` error | torchaudio >= 2.1 | Monkey-patch dans main.py/tts.py (déjà fait) |
+| `FLAX_WEIGHTS_NAME` error | transformers trop récent | `pip install diffusers==0.32.2 transformers==4.47.1` |
+
+### Commandes de monitoring utiles
+
+```bash
+watch -n 2 nvidia-smi              # GPU (VRAM, utilisation)
+journalctl -u avatar-worker -f     # Logs worker en temps réel
+journalctl -u avatar-ngrok -f      # Logs ngrok
+htop                               # CPU/RAM
+df -h /                            # Espace disque
+free -h                            # RAM + swap
+curl http://localhost:8000/health   # Test worker
 ```
 
 ## Dépendances frontend (package.json)
