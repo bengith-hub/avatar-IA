@@ -226,7 +226,7 @@ pip install diffusers==0.33.0 transformers==4.40.1
 # accelerate: required by diffusers for model loading/offloading
 # imageio: required for video frame I/O in pipeline
 # opencv-python-headless: required for image processing (cv2) — headless = no GUI deps
-pip install accelerate imageio opencv-python-headless
+pip install accelerate imageio imageio-ffmpeg opencv-python-headless decord
 
 # Install ninja (speeds up flash-attn compilation from 30min to 10-15min)
 pip install ninja
