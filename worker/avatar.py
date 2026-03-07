@@ -161,15 +161,31 @@ class AvatarEngine:
         except Exception:
             gpu_vram_mb = 24000  # fallback: assume 24GB
 
-        # Choose settings based on VRAM:
-        #   >= 40GB: no cpu-offload → FAST (~5-10 min per video)
-        #   < 40GB:  cpu-offload + infer-min → SLOW (~75 min) but fits in 24GB
-        use_offload = gpu_vram_mb < 38000
-        infer_steps = "30" if use_offload else "50"
+        # Choose settings based on VRAM (3 tiers):
+        #   >= 70GB: no cpu-offload, 50 steps → FASTEST (A100 80GB, H100)
+        #   40-70GB: cpu-offload, 50 steps   → FAST (A100 40GB — fast bandwidth)
+        #   < 40GB:  cpu-offload + infer-min, 30 steps → SLOW (RTX 3090 24GB)
+        use_infer_min = False
+        if gpu_vram_mb >= 70000:
+            # 80GB+ GPUs: full model on GPU, no offload
+            use_offload = False
+            infer_steps = "50"
+            mode_desc = "full GPU mode (no offload)"
+        elif gpu_vram_mb >= 38000:
+            # 40-70GB GPUs: offload weights to CPU, but full steps
+            use_offload = True
+            infer_steps = "50"
+            mode_desc = "cpu-offload mode (mid VRAM, full steps)"
+        else:
+            # < 40GB GPUs: offload + minimal memory mode
+            use_offload = True
+            use_infer_min = True
+            infer_steps = "30"
+            mode_desc = "cpu-offload + infer-min mode (low VRAM)"
         logger.info(
             "GPU VRAM: %d MB — %s (steps=%s)",
             gpu_vram_mb,
-            "cpu-offload mode (low VRAM)" if use_offload else "full GPU mode (fast)",
+            mode_desc,
             infer_steps,
         )
 
@@ -190,7 +206,9 @@ class AvatarEngine:
             "--save-path", job_results_dir,
         ]
         if use_offload:
-            cmd.extend(["--cpu-offload", "--infer-min"])
+            cmd.append("--cpu-offload")
+        if use_infer_min:
+            cmd.append("--infer-min")
         if use_fp8:
             cmd.append("--use-fp8")
 
