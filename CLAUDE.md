@@ -53,7 +53,7 @@ avatar-IA/
 - **IA** : HunyuanVideo-Avatar (animation, subprocess via CSV) + FishAudio OpenAudio S1-mini (TTS/voice clone)
 - **Post-prod** : ffmpeg (installé sur la VM)
 - **Sécurité** : auth par Bearer token dans le header `Authorization`
-- **Réseau** : instance Docker Vast.ai avec port 8000 mappé automatiquement (pas de tunnel nécessaire)
+- **Réseau** : instance Docker Vast.ai. Port 8000 exposé via cloudflared tunnel (URL dynamique). `GPU_WORKER_URL` en env Vercel pointe vers l'URL tunnel
 
 ## APIs externes intégrées
 
@@ -271,7 +271,7 @@ AUTH_PASSWORD_HASH=         # SHA-256 du mot de passe
 
 # Vast.ai
 VAST_API_KEY=
-VAST_INSTANCE_ID=           # Actuellement : 32454128
+VAST_INSTANCE_ID=           # Actuellement : 32479135 (A100 SXM4 40GB, Suède)
 
 # GPU Worker
 GPU_WORKER_URL=             # OPTIONNEL — override manuel (sinon auto-détecté via Vast.ai API)
@@ -649,24 +649,52 @@ typescript@^5
   - GPU 48GB+ (A6000 $0.37/h) pour enlever cpu-offload → ~10x plus rapide
   - Réduire infer-steps à 20 (qualité moindre mais 2x plus rapide)
 
-### HunyuanVideo-Avatar : benchmarks RTX 3090 (24GB)
+### HunyuanVideo-Avatar : benchmarks
 
-Tests effectués le 6 mars 2026 sur instance Vast.ai 32454128 :
+#### RTX 3090 (24GB) — Instance 32454128
+
+Tests effectués le 6 mars 2026 :
 
 | Config | Frames | Résolution | Steps | VRAM peak | Temps | Résultat |
 |--------|--------|-----------|-------|-----------|-------|----------|
 | Minimal | 33 | 384px | 25 | ~11 GB | ~5 min | OK — 220KB, 1.3s, basse qualité |
 | **Full quality** | **129** | **704px** | **50** | **~17 GB** | **~2h30** | **OK — stable, pas d'OOM** |
-| Production | 129 | 704px | 30 | ~17 GB | **~75 min** | Compromis retenu (code actuel) |
+| Production | 129 | 704px | 30 | ~17 GB | **~75 min** | Compromis retenu |
 
-Paramètres communs : `--cpu-offload --use-fp8 --infer-min --use-deepcache 1`
+Paramètres : `--cpu-offload --use-fp8 --infer-min --use-deepcache 1`
 
-Notes :
+#### A100 SXM4 40GB — Instance 32479135
+
+Tests effectués le 7 mars 2026 (Suède, $0.54/h) :
+
+| Config | Frames | Résolution | Steps | VRAM peak | Temps | Résultat |
+|--------|--------|-----------|-------|-----------|-------|----------|
+| Sans offload | 129 | 704px | 50 | **>40 GB** | N/A | **OOM** — 40GB insuffisant sans offload |
+| **Avec offload** | **129** | **704px** | **50** | **~18 GB** | **~56 min** | **OK — 3× plus rapide que RTX 3090** |
+
+Paramètres : `--cpu-offload --use-fp8 --use-deepcache 1` (PAS `--infer-min` sur A100)
+
+#### Détection automatique VRAM (3 tiers dans avatar.py)
+
+| VRAM | Mode | Steps | Flags | GPU cibles |
+|------|------|-------|-------|------------|
+| >= 70GB | Full GPU | 50 | `--use-fp8` | A100 80GB, H100 |
+| 40-70GB | CPU offload | 50 | `--cpu-offload --use-fp8` | A100 40GB |
+| < 40GB | CPU offload + min | 30 | `--cpu-offload --use-fp8 --infer-min` | RTX 3090/4090 |
+
+#### TTS (fish-speech openaudio-s1-mini) sur A100 40GB
+
+- Chargement modèle : ~25s
+- Génération speech (phrase courte) : ~6.5s (11.21 tokens/sec)
+- VRAM utilisée : ~5 GB
+
+Notes générales :
 - `--cpu-offload` : les poids du modèle (~30GB) restent en RAM CPU, transférés au GPU pendant le calcul
 - `--use-fp8` : poids transformer en FP8 (réduit VRAM de ~3GB)
-- `--infer-min` : mode inférence minimal (réduit les buffers)
+- `--infer-min` : mode inférence minimal (réduit les buffers) — réservé aux GPUs < 40GB
 - `--use-deepcache 1` : flag présent dans le code mais **PAS implémenté** dans le loop de débruitage (n'a aucun effet)
 - La RAM système doit être >= 32GB pour le cpu-offload (35GB utilisés en pic)
+- **openaudio-s1-mini est gated sur HuggingFace** → télécharger via ModelScope : `modelscope download --model fishaudio/openaudio-s1-mini`
 
 ### Historique ngrok (référence si besoin de rollback)
 
