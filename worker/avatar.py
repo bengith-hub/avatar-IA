@@ -149,11 +149,32 @@ class AvatarEngine:
         # Determine if FP8 checkpoint
         use_fp8 = "fp8" in os.path.basename(self._checkpoint).lower()
 
+        # Detect GPU VRAM to choose optimal settings
+        gpu_vram_mb = 0
+        try:
+            import subprocess as _sp
+            _out = _sp.check_output(
+                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+                text=True,
+            ).strip()
+            gpu_vram_mb = int(_out.split("\n")[0])
+        except Exception:
+            gpu_vram_mb = 24000  # fallback: assume 24GB
+
+        # Choose settings based on VRAM:
+        #   >= 40GB: no cpu-offload → FAST (~5-10 min per video)
+        #   < 40GB:  cpu-offload + infer-min → SLOW (~75 min) but fits in 24GB
+        use_offload = gpu_vram_mb < 38000
+        infer_steps = "30" if use_offload else "50"
+        logger.info(
+            "GPU VRAM: %d MB — %s (steps=%s)",
+            gpu_vram_mb,
+            "cpu-offload mode (low VRAM)" if use_offload else "full GPU mode (fast)",
+            infer_steps,
+        )
+
         # Build inference command
-        # RTX 3090 (24GB) with cpu-offload + FP8: full quality settings
         # 129 frames ≈ 5.2s at 25fps, 704px resolution
-        # ~75 min per video with 30 steps, ~2h30 with 50 steps
-        # Peak VRAM: ~17 GB (model weights offloaded to CPU RAM)
         cmd = [
             sys.executable,
             "hymm_sp/sample_gpu_poor.py",
@@ -163,20 +184,20 @@ class AvatarEngine:
             "--seed", "128",
             "--image-size", "704",
             "--cfg-scale", "7.5",
-            "--infer-steps", "30",
+            "--infer-steps", infer_steps,
             "--use-deepcache", "1",
             "--flow-shift-eval-video", "5.0",
             "--save-path", job_results_dir,
-            "--cpu-offload",
-            "--infer-min",
         ]
+        if use_offload:
+            cmd.extend(["--cpu-offload", "--infer-min"])
         if use_fp8:
             cmd.append("--use-fp8")
 
         env = {
             **os.environ,
             "MODEL_BASE": os.path.join(self.install_path, "weights"),
-            "CPU_OFFLOAD": "1",
+            "CPU_OFFLOAD": "1" if use_offload else "0",
             "PYTHONPATH": ".",
             "CUDA_VISIBLE_DEVICES": "0",
             "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",

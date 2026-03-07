@@ -154,7 +154,7 @@ if [ ! -f /swapfile ]; then
     fallocate -l "$SWAP_SIZE" /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1G count=${SWAP_SIZE%G}
     chmod 600 /swapfile
     mkswap /swapfile
-    swapon /swapfile
+    swapon /swapfile 2>/dev/null || echo "  (swapon failed — normal in Docker containers, skipping)"
     # Persist across reboots
     if ! grep -q '/swapfile' /etc/fstab; then
         echo '/swapfile none swap sw 0 0' >> /etc/fstab
